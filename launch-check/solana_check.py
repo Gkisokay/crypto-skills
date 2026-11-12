@@ -147,11 +147,22 @@ def fee_payer(tx):
     return k["pubkey"] if isinstance(k, dict) else k
 
 
-def launch_sigs(call, url, mint):
+def launch_sigs(call, url, mint, window_s=180):
     if "helius" in url:
         try:
-            page = call("getTransactionsForAddress", [mint, {"transactionDetails": "signatures", "sortOrder": "asc", "limit": 1000}])
-            return [x for x in (page or {}).get("data") or [] if not x.get("err")], False
+            # sniped launches fill whole pages with failed buys, so keep paging until the launch window is covered
+            out, token = [], None
+            for _ in range(MAX_SIG_PAGES):
+                opts = {"transactionDetails": "signatures", "sortOrder": "asc", "limit": 1000}
+                if token:
+                    opts["paginationToken"] = token
+                page = call("getTransactionsForAddress", [mint, opts]) or {}
+                data = page.get("data") or []
+                out += data
+                token = page.get("paginationToken")
+                if len(data) < 1000 or not token or (data[-1].get("blockTime") or 0) > (out[0].get("blockTime") or 0) + window_s:
+                    break
+            return [x for x in out if not x.get("err")], False
         except RuntimeError:
             pass
     sigs, before = [], None
@@ -230,7 +241,7 @@ def check_solana(cc, mint, m):
     pools = set((m or {}).get("pairs_any") or [])
 
     # creation: oldest signatures via Helius fast path, else walk backwards to oldest
-    sigs, capped = launch_sigs(call, rpc.url, mint)
+    sigs, capped = launch_sigs(call, rpc.url, mint, cc.LAUNCH_WINDOW_S)
     if capped:
         r["notes"].append(f"More than {MAX_SIG_PAGES * 1000:,} transactions, so the launch wasn't reached; launch checks skipped.")
         sigs = None
@@ -242,7 +253,12 @@ def check_solana(cc, mint, m):
         t0, slot0 = first["blockTime"], first["slot"]
         r["creator"] = creator
         r["launch"] = {"block": slot0, "ts": t0, "creator": creator, "block_time_s": 0.4}
-        early = [s["signature"] for s in sigs if (s.get("blockTime") or t0) <= t0 + cc.LAUNCH_WINDOW_S][:MAX_EARLY_TXS]
+        in_window = [s for s in sigs if (s.get("blockTime") or t0) <= t0 + cc.LAUNCH_WINDOW_S]
+        early = [s["signature"] for s in in_window[:MAX_EARLY_TXS]]
+        if len(in_window) > MAX_EARLY_TXS:  # a busy launch: say how much of the window was actually read
+            r["launch"]["window_s"] = max((in_window[MAX_EARLY_TXS - 1].get("blockTime") or t0) - t0, 1)
+            r["notes"].append(f"The launch had {len(in_window):,} successful transactions in its first {cc.LAUNCH_WINDOW_S} s; "
+                              f"only the first {MAX_EARLY_TXS} were read, covering {r['launch']['window_s']} s.")
         with ThreadPoolExecutor(WORKERS) as ex:
             txs = list(ex.map(lambda s: call("getTransaction", [s, {"encoding": "jsonParsed",
                                                                    "maxSupportedTransactionVersion": 1}]), early))

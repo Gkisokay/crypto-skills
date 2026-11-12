@@ -547,6 +547,30 @@ class Solana(unittest.TestCase):
         self.assertEqual([s["signature"] for s in sigs2], ["old", "new"])
         self.assertTrue(any(m == "getSignaturesForAddress" for m, _ in fb_calls))
 
+    def test_helius_pages_past_failed_sniper_spam_to_cover_the_launch_window(self):
+        # $MAX (Nov 11 2026): 1,000 signatures, 964 of them failed snipes, only reached 55 s after creation
+        import solana_check as sc
+        calls = []
+        page1 = [{"signature": f"f{i}", "slot": 1 + i // 20, "blockTime": 1 + i * 54 // 999, "err": {"x": 1} if i % 28 else None}
+                 for i in range(1000)]
+        page2 = [{"signature": f"burst{i}", "slot": 60, "blockTime": 55, "err": None} for i in range(24)]
+
+        def helius(method, params):
+            calls.append(params[1].get("paginationToken"))
+            return {"data": page1, "paginationToken": "p2"} if len(calls) == 1 else {"data": page2, "paginationToken": None}
+
+        sigs, capped = sc.launch_sigs(helius, "https://mainnet.helius-rpc.com/?api-key=x", "mint")
+        self.assertFalse(capped)
+        self.assertEqual(calls, [None, "p2"])
+        self.assertEqual(sum(1 for s in sigs if s["signature"].startswith("burst")), 24)
+        self.assertFalse(any(s.get("err") for s in sigs))
+
+    def test_header_says_how_much_of_the_window_was_read(self):
+        r = {"address": "M", "chain": "solana", "symbol": "MAX", "market": None, "flags": [], "notes": [], "cant_check": [],
+             "supply": {"total": 1e9, "burned": 0, "real_fdv": None}, "holders": {},
+             "launch": {"block": 1, "ts": 0, "creator": "C", "early_buyers": 19, "early_bought_share": 0.12, "window_s": 41}}
+        self.assertIn("First 41s of trading: 19 wallets", cc.fmt(r))
+
     def test_bundle_flags_three_minute_on_sol(self):
         import solana_check as sc
         buys = {}

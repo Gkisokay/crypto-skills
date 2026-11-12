@@ -1185,7 +1185,7 @@ def fmt(r):
         if L.get("first_buy_ts"):
             lines.append(f"Trading opened {time.strftime('%Y-%m-%d %H:%M:%SZ', time.gmtime(L['first_buy_ts']))} "
                          f"(block {L['first_buy_block']}), {human_span(L['first_buy_ts'] - L['ts'])} after the mint")
-        lines.append(f"First {LAUNCH_WINDOW_S}s of trading: {L['early_buyers']} wallets took {L['early_bought_share']:.1%} of supply")
+        lines.append(f"First {L.get('window_s', LAUNCH_WINDOW_S)}s of trading: {L['early_buyers']} wallets took {L['early_bought_share']:.1%} of supply")
     lines.append("")
     lines.append("Red flags:" if r["flags"] else
                  "Red flags: none found by these checks (that is not the same as safe)." if L else

@@ -875,7 +875,7 @@ class LiquidityPulls(unittest.TestCase):
         out = cc.liquidity_pulls(self.fake(logs, 736889873114803), {self.POOL}, self.TOKEN, self.LP_REMOVER, 0, 0x3557c00, listed_open)
         self.assertEqual(len(out), 1)
         self.assertNotRegex(out[0], r"-\d+(\.\d+)? ?(s|min|h)\b")
-        self.assertIn("at 2026-", out[0])
+        self.assertIn("time unknown after the first pool opened", out[0])
 
     def test_small_removal_after_another_wallet_emptied_the_pool_is_not_a_pull(self):
         big, small = "0x" + "a1" * 32, "0x" + "b2" * 32

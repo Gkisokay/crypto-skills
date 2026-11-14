@@ -8,6 +8,14 @@ or the caller says. Pool addresses, prices and liquidity figures come from DexSc
 
 New skills go out by email first: **[sign up on Substack](https://substack.com/@gkisokay)** (free).
 
+## Skills
+
+Each skill folder is self-contained (code + docs), so new skills can be added beside `launch-check/`.
+
+| Skill folder | What it does | Run from repo root | Tests |
+|---|---|---|---|
+| `launch-check/` | Checks a fresh token's launch: creator, early buyers/funders, bundle patterns, liquidity control/pulls (EVM), FDV mismatch, holders | `python3 launch-check/launch_check.py <address>` | `python3 -m unittest discover -s tests -q` |
+
 ## launch-check
 
 Paste a token address, get back:
@@ -69,6 +77,7 @@ There's nothing else to install.
 
 ```
 git clone https://github.com/Gkisokay/crypto-skills
+cd crypto-skills
 ```
 
 **Claude Code:** copy the skill into your skills folder, then just ask Claude to check a coin.
@@ -85,8 +94,9 @@ mkdir -p ~/.claude/skills && cp -R crypto-skills/launch-check ~/.claude/skills/
 **No AI, just the terminal:**
 
 ```
-python3 crypto-skills/launch-check/launch_check.py <address>
-python3 crypto-skills/launch-check/launch_check.py <address> --chain base
+python3 launch-check/launch_check.py <address>
+python3 launch-check/launch_check.py <address> --chain base
+python3 -m unittest discover -s tests -q
 ```
 
 A check takes seconds on Base and one to three minutes on Robinhood Chain. On an

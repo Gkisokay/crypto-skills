@@ -334,6 +334,8 @@ def check_solana(cc, mint, m):
     r["holders"] = h
     r.setdefault("clusters", [])
     r["flags"] = cc.flags(r)
+    r["flag_codes"] = cc.verdict.flag_codes(r["flags"])
+    r["verdict"] = cc.verdict.main_verdict(r["flags"], launch_checks_ran=bool(r.get("launch")))
     r["cant_check"] = [
         "Funding older than a wallet's first transaction, or routed through an exchange or a bridge.",
         "Wallets that already had 1,000+ transactions before buying (not traced).",

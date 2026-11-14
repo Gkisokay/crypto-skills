@@ -1,0 +1,38 @@
+[
+  {
+    "name": "liquidity_pulled_beats_bundle",
+    "flags": [
+      "Likely bundle: 6 wallets bought 64.0% of supply within 2.3 s of trading opening, in near-identical sizes (~10.7% each).",
+      "Liquidity pulled: The creator 0x1111111111111111111111111111111111111111 removed 42.0 WETH from pool 0x2222222222222222222222222222222222222222, 13 min after the first pool opened; the pool has 0.01 WETH left. Last removal: tx 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ],
+    "expected_code": "LP_PULLED",
+    "verdict_contains": "liquidity was pulled"
+  },
+  {
+    "name": "honeypot_beats_bundle",
+    "flags": [
+      "Likely bundle: 5 wallets bought 38.0% of supply within 3.0 s of trading opening, in near-identical sizes (~7.6% each).",
+      "Contract trap: sell is blocked for ordinary wallets (honeypot behavior)."
+    ],
+    "expected_code": "HONEYPOT_OR_SELL_BLOCKED",
+    "verdict_contains": "can't be transferred out by ordinary wallets"
+  },
+  {
+    "name": "bundle_beats_tax_and_creator",
+    "flags": [
+      "Token tax is 28% on transfer from non-exempt wallets.",
+      "Creator wallet holds 19.0% of supply.",
+      "Likely bundle: 8 wallets bought 42.0% of supply within 2.7 s of trading opening, in near-identical sizes (~5.2% each)."
+    ],
+    "expected_code": "BUNDLE",
+    "verdict_contains": "fresh-wallet bundle"
+  },
+  {
+    "name": "unknown_flag_falls_back_to_first",
+    "flags": [
+      "Unmapped anomaly: wallet 0x3333333333333333333333333333333333333333 touched 4 launch txs."
+    ],
+    "expected_code": "FLAG_OTHER",
+    "verdict_contains": "Unmapped anomaly"
+  }
+]

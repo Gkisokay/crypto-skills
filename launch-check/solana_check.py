@@ -247,6 +247,7 @@ def check_solana(cc, mint, m):
 
     creator, txs, groups, bought = None, [], [], {}
     sol_checks = {"flags": [], "notes": [], "cant_check": []}
+    creator_cant = []
     if sigs:
         first = call("getTransaction", [sigs[0]["signature"], {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 1}])
         creator = fee_payer(first)
@@ -324,6 +325,10 @@ def check_solana(cc, mint, m):
         )
         r["extra_flags"].extend(sol_checks["flags"])
         r["notes"].extend(sol_checks["notes"])
+        import creator as creator_checks
+        creator_cant = creator_checks.add_solana_creator_checks(
+            cc, call, rpc.url, r, mint, creator, t0, launch_total, txs, set([curve]) | set(pools)
+        )
 
     # top holders: the 20 largest token accounts, labeled by who owns them
     largest = call("getTokenLargestAccounts", [mint])["value"]
@@ -361,6 +366,7 @@ def check_solana(cc, mint, m):
         "Only the first 3 minutes after creation are read (up to 150 transactions), so a busy launch is only partly covered.",
     ] + sol_checks["cant_check"] + hp_cant + ([m["copycat_cant_check"]] if m and m.get("copycat_cant_check") else [])
     r["cant_check"].extend(trap_cant_check)
+    r["cant_check"] += [x for x in creator_cant if x not in r["cant_check"]]
     return r
 
 

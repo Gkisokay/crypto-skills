@@ -1,0 +1,39 @@
+{
+  "mint": "AffairInuMint11111111111111111111111111111111",
+  "creator": "AffairCreator111111111111111111111111111111",
+  "launch_total": 1000000.0,
+  "launch_ts": 1700000000,
+  "txs": [
+    {
+      "slot": 10,
+      "blockTime": 1700000000,
+      "signature": "CreateTxAffair1111111111111111111111111111111111111",
+      "transaction": {"signatures": ["CreateTxAffair1111111111111111111111111111111111111"]},
+      "meta": {
+        "preTokenBalances": [
+          {"mint": "AffairInuMint11111111111111111111111111111111", "owner": "Curve111111111111111111111111111111111111111", "uiTokenAmount": {"uiAmount": 1000000.0}}
+        ],
+        "postTokenBalances": [
+          {"mint": "AffairInuMint11111111111111111111111111111111", "owner": "Curve111111111111111111111111111111111111111", "uiTokenAmount": {"uiAmount": 952100.0}},
+          {"mint": "AffairInuMint11111111111111111111111111111111", "owner": "AffairCreator111111111111111111111111111111", "uiTokenAmount": {"uiAmount": 47900.0}}
+        ]
+      }
+    },
+    {
+      "slot": 11,
+      "blockTime": 1700000003,
+      "signature": "3CLgGkc15K7RnfaCSpyTKnVJqvGkVSB1Jji2MjVosLhyvE8KEfo5jiFJJsXJ6v9gxxSLzsFJZVhM8ZBeuZXyB4kA",
+      "transaction": {"signatures": ["3CLgGkc15K7RnfaCSpyTKnVJqvGkVSB1Jji2MjVosLhyvE8KEfo5jiFJJsXJ6v9gxxSLzsFJZVhM8ZBeuZXyB4kA"]},
+      "meta": {
+        "preTokenBalances": [
+          {"mint": "AffairInuMint11111111111111111111111111111111", "owner": "Curve111111111111111111111111111111111111111", "uiTokenAmount": {"uiAmount": 952100.0}},
+          {"mint": "AffairInuMint11111111111111111111111111111111", "owner": "AffairCreator111111111111111111111111111111", "uiTokenAmount": {"uiAmount": 47900.0}}
+        ],
+        "postTokenBalances": [
+          {"mint": "AffairInuMint11111111111111111111111111111111", "owner": "Curve111111111111111111111111111111111111111", "uiTokenAmount": {"uiAmount": 1000000.0}},
+          {"mint": "AffairInuMint11111111111111111111111111111111", "owner": "AffairCreator111111111111111111111111111111", "uiTokenAmount": {"uiAmount": 0.0}}
+        ]
+      }
+    }
+  ]
+}

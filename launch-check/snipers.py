@@ -75,8 +75,9 @@ def sniper_suffix(wallets, profiles, launch_ts):
         return ""
     if mostly_snipers(counts, len(profiled)):
         return f" They are mostly sniper bots: {counts['bot-sniper']} of the {len(profiled)} profiled have 1,000+ txs."
-    return (f" Of the {len(profiled)} profiled, {counts['bot-sniper']} are sniper bots (1,000+ txs) and "
-            f"{counts['fresh-bundle']} are fresh wallets made for this launch.")
+    bots, fresh = counts["bot-sniper"], counts["fresh-bundle"]
+    return (f" Of the {len(profiled)} profiled, {bots} {'is a sniper bot' if bots == 1 else 'are sniper bots'} (1,000+ txs) and "
+            f"{fresh} {'is a fresh wallet' if fresh == 1 else 'are fresh wallets'} made for this launch.")
 
 
 def same_block_take_flag(wallets, open_ts, buys, total, profiles):

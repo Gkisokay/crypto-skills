@@ -1,0 +1,397 @@
+{
+  "clean_pump": {
+    "value": {
+      "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "data": {
+        "program": "spl-token",
+        "parsed": {
+          "type": "mint",
+          "info": {
+            "mintAuthority": null,
+            "supply": "1000000000000000",
+            "decimals": 6,
+            "isInitialized": true,
+            "freezeAuthority": null
+          }
+        },
+        "space": 82
+      }
+    }
+  },
+  "mint_authority": {
+    "value": {
+      "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "data": {
+        "program": "spl-token",
+        "parsed": {
+          "type": "mint",
+          "info": {
+            "mintAuthority": "DDmGnuvroxVrb7CSyjYcezFU8gnAfhKasg4ZZezmpump",
+            "supply": "1000000000000000",
+            "decimals": 6,
+            "isInitialized": true,
+            "freezeAuthority": null
+          }
+        },
+        "space": 82
+      }
+    }
+  },
+  "freeze_authority": {
+    "value": {
+      "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "data": {
+        "program": "spl-token",
+        "parsed": {
+          "type": "mint",
+          "info": {
+            "mintAuthority": null,
+            "supply": "1000000000000000",
+            "decimals": 6,
+            "isInitialized": true,
+            "freezeAuthority": "7cW45tcSDSiog8poB5LFu7CD1g4TX6JYJ8s4Ur29cb5H"
+          }
+        },
+        "space": 82
+      }
+    }
+  },
+  "transfer_fee_config": {
+    "value": {
+      "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "data": {
+        "program": "spl-token-2022",
+        "parsed": {
+          "type": "mint",
+          "info": {
+            "mintAuthority": null,
+            "supply": "1000000000000000",
+            "decimals": 6,
+            "isInitialized": true,
+            "freezeAuthority": null,
+            "extensions": [
+              {
+                "extension": "transferFeeConfig",
+                "state": {
+                  "transferFeeConfigAuthority": "FhVo3mqL8PW5pH5U2CN4XE33DokiyZnUwuGpH2hmHLuM",
+                  "withdrawWithheldAuthority": "Hkm9m53BVZsV3SRf23zzq6BVEpcsfz2M6Ucsa837Nzk7",
+                  "withheldAmount": "0",
+                  "olderTransferFee": {
+                    "epoch": "1",
+                    "maximumFee": "25000000",
+                    "transferFeeBasisPoints": 350
+                  },
+                  "newerTransferFee": {
+                    "epoch": "2",
+                    "maximumFee": "40000000",
+                    "transferFeeBasisPoints": 450
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "space": 278
+      }
+    }
+  },
+  "transfer_fee_revoked_authority": {
+    "value": {
+      "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "data": {
+        "program": "spl-token-2022",
+        "parsed": {
+          "type": "mint",
+          "info": {
+            "mintAuthority": "DDmGnuvroxVrb7CSyjYcezFU8gnAfhKasg4ZZezmpump",
+            "supply": "1000000000000000",
+            "decimals": 6,
+            "isInitialized": true,
+            "freezeAuthority": null,
+            "extensions": [
+              {
+                "extension": "transferFeeConfig",
+                "state": {
+                  "transferFeeConfigAuthority": null,
+                  "withdrawWithheldAuthority": "Hkm9m53BVZsV3SRf23zzq6BVEpcsfz2M6Ucsa837Nzk7",
+                  "withheldAmount": "0",
+                  "olderTransferFee": {
+                    "epoch": "1",
+                    "maximumFee": "30000000",
+                    "transferFeeBasisPoints": 250
+                  },
+                  "newerTransferFee": {
+                    "epoch": "2",
+                    "maximumFee": "30000000",
+                    "transferFeeBasisPoints": 250
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "space": 278
+      }
+    }
+  },
+  "transfer_fee_zero_revoked": {
+    "value": {
+      "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "data": {
+        "program": "spl-token-2022",
+        "parsed": {
+          "type": "mint",
+          "info": {
+            "mintAuthority": "DDmGnuvroxVrb7CSyjYcezFU8gnAfhKasg4ZZezmpump",
+            "supply": "1000000000000000",
+            "decimals": 6,
+            "isInitialized": true,
+            "freezeAuthority": null,
+            "extensions": [
+              {
+                "extension": "transferFeeConfig",
+                "state": {
+                  "transferFeeConfigAuthority": null,
+                  "withdrawWithheldAuthority": "Hkm9m53BVZsV3SRf23zzq6BVEpcsfz2M6Ucsa837Nzk7",
+                  "withheldAmount": "0",
+                  "olderTransferFee": {
+                    "epoch": "1",
+                    "maximumFee": "30000000",
+                    "transferFeeBasisPoints": 0
+                  },
+                  "newerTransferFee": {
+                    "epoch": "2",
+                    "maximumFee": "30000000",
+                    "transferFeeBasisPoints": 0
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "space": 278
+      }
+    }
+  },
+  "transfer_hook": {
+    "value": {
+      "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "data": {
+        "program": "spl-token-2022",
+        "parsed": {
+          "type": "mint",
+          "info": {
+            "mintAuthority": null,
+            "supply": "1000000000000000",
+            "decimals": 6,
+            "isInitialized": true,
+            "freezeAuthority": null,
+            "extensions": [
+              {
+                "extension": "transferHook",
+                "state": {
+                  "authority": "2tHSj5CRX9uXRuDw5PJoSuWvw4JT9TFxFc8zZYFSVnyP",
+                  "programId": "noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV"
+                }
+              }
+            ]
+          }
+        },
+        "space": 278
+      }
+    }
+  },
+  "transfer_hook_no_program": {
+    "value": {
+      "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "data": {
+        "program": "spl-token-2022",
+        "parsed": {
+          "type": "mint",
+          "info": {
+            "mintAuthority": null,
+            "supply": "1000000000000000",
+            "decimals": 6,
+            "isInitialized": true,
+            "freezeAuthority": null,
+            "extensions": [
+              {
+                "extension": "transferHook",
+                "state": {
+                  "authority": "2tHSj5CRX9uXRuDw5PJoSuWvw4JT9TFxFc8zZYFSVnyP",
+                  "programId": null
+                }
+              }
+            ]
+          }
+        },
+        "space": 278
+      }
+    }
+  },
+  "permanent_delegate": {
+    "value": {
+      "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "data": {
+        "program": "spl-token-2022",
+        "parsed": {
+          "type": "mint",
+          "info": {
+            "mintAuthority": null,
+            "supply": "1000000000000000",
+            "decimals": 6,
+            "isInitialized": true,
+            "freezeAuthority": null,
+            "extensions": [
+              {
+                "extension": "permanentDelegate",
+                "state": {
+                  "delegate": "HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTLcC"
+                }
+              }
+            ]
+          }
+        },
+        "space": 278
+      }
+    }
+  },
+  "permanent_delegate_null": {
+    "value": {
+      "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "data": {
+        "program": "spl-token-2022",
+        "parsed": {
+          "type": "mint",
+          "info": {
+            "mintAuthority": null,
+            "supply": "1000000000000000",
+            "decimals": 6,
+            "isInitialized": true,
+            "freezeAuthority": null,
+            "extensions": [
+              {
+                "extension": "permanentDelegate",
+                "state": {
+                  "delegate": null
+                }
+              }
+            ]
+          }
+        },
+        "space": 278
+      }
+    }
+  },
+  "default_account_state_frozen": {
+    "value": {
+      "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "data": {
+        "program": "spl-token-2022",
+        "parsed": {
+          "type": "mint",
+          "info": {
+            "mintAuthority": null,
+            "supply": "1000000000000000",
+            "decimals": 6,
+            "isInitialized": true,
+            "freezeAuthority": "7cW45tcSDSiog8poB5LFu7CD1g4TX6JYJ8s4Ur29cb5H",
+            "extensions": [
+              {
+                "extension": "defaultAccountState",
+                "state": {
+                  "accountState": "frozen",
+                  "authority": "7cW45tcSDSiog8poB5LFu7CD1g4TX6JYJ8s4Ur29cb5H"
+                }
+              }
+            ]
+          }
+        },
+        "space": 278
+      }
+    }
+  },
+  "non_transferable": {
+    "value": {
+      "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "data": {
+        "program": "spl-token-2022",
+        "parsed": {
+          "type": "mint",
+          "info": {
+            "mintAuthority": "CJyaPwhfcRHL57Nrmr4yTV2egpWoGx9ZeKQjScDfi3Hd",
+            "supply": "1000000000000000",
+            "decimals": 6,
+            "isInitialized": true,
+            "freezeAuthority": null,
+            "extensions": [
+              {
+                "extension": "nonTransferable",
+                "state": {
+                  "authority": "CJyaPwhfcRHL57Nrmr4yTV2egpWoGx9ZeKQjScDfi3Hd"
+                }
+              }
+            ]
+          }
+        },
+        "space": 278
+      }
+    }
+  },
+  "confidential_transfer": {
+    "value": {
+      "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "data": {
+        "program": "spl-token-2022",
+        "parsed": {
+          "type": "mint",
+          "info": {
+            "mintAuthority": null,
+            "supply": "1000000000000000",
+            "decimals": 6,
+            "isInitialized": true,
+            "freezeAuthority": null,
+            "extensions": [
+              {
+                "extension": "confidentialTransferMint",
+                "state": {
+                  "authority": "FhVo3mqL8PW5pH5U2CN4XE33DokiyZnUwuGpH2hmHLuM",
+                  "autoApproveNewAccounts": false
+                }
+              }
+            ]
+          }
+        },
+        "space": 278
+      }
+    }
+  },
+  "pausable_config": {
+    "value": {
+      "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "data": {
+        "program": "spl-token-2022",
+        "parsed": {
+          "type": "mint",
+          "info": {
+            "mintAuthority": null,
+            "supply": "1000000000000000",
+            "decimals": 6,
+            "isInitialized": true,
+            "freezeAuthority": null,
+            "extensions": [
+              {
+                "extension": "pausableConfig",
+                "state": {
+                  "authority": "2tHSj5CRX9uXRuDw5PJoSuWvw4JT9TFxFc8zZYFSVnyP",
+                  "paused": true
+                }
+              }
+            ]
+          }
+        },
+        "space": 278
+      }
+    }
+  }
+}

@@ -7,6 +7,7 @@ import collections
 import hashlib
 import os
 from concurrent.futures import ThreadPoolExecutor
+import solana_traps
 
 SYSTEM = "11111111111111111111111111111111"
 PUMP = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
@@ -228,14 +229,9 @@ def check_solana(cc, mint, m):
         raise SystemExit(f"{mint} reports a total supply of 0; there is nothing to check.")
     r["symbol"] = m["symbol"] if m else mint[:6]
     r["supply"] = {"total": total, "burned": 0.0, "real_fdv": cc.real_fdv(m["price"], total, 0) if m and m["price"] else None}
-    if info.get("mintAuthority"):
-        r["extra_flags"].append(f"Mint authority is still set ({info['mintAuthority']}): more tokens can be created.")
-    if info.get("freezeAuthority"):
-        r["extra_flags"].append(f"Freeze authority is still set ({info['freezeAuthority']}): holders' tokens can be frozen.")
-    exts = [e.get("extension") for e in info.get("extensions") or []]
-    risky = [e for e in exts if e in ("transferFeeConfig", "transferHook", "permanentDelegate", "pausableConfig")]
-    if risky:
-        r["extra_flags"].append(f"Token-2022 extensions that can take or block tokens: {', '.join(risky)}.")
+    trap_flags, trap_notes, trap_cant_check = solana_traps.mint_trap_findings(acct)
+    r["extra_flags"].extend(trap_flags)
+    r["notes"].extend(trap_notes)
 
     curve = pda([b"bonding-curve", b58decode(mint)], PUMP)
     pools = set((m or {}).get("pairs_any") or [])
@@ -344,6 +340,7 @@ def check_solana(cc, mint, m):
         "pump.fun that can be the launchpad's own wallet.",
         "Only the first 3 minutes after creation are read (up to 150 transactions), so a busy launch is only partly covered.",
     ]
+    r["cant_check"].extend(trap_cant_check)
     return r
 
 

@@ -21,6 +21,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
+import copycat
+import holder_patterns
 
 UA = {"User-Agent": "launch-check/0.1 (+https://github.com/Gkisokay/crypto-skills)", "Content-Type": "application/json"}
 EVM_ADDRESS = re.compile(r"0x[0-9a-fA-F]{40}")
@@ -810,10 +812,22 @@ def gt_holders(chain, addr):
 def check(addr, chain=None):
     if not addr.startswith("0x"):  # Solana addresses are base58 and case-sensitive
         chain, m = market(addr, "solana")
+        if m:
+            cflag, ccant = copycat.find_copycat_flag(addr, "solana", m, http_json)
+            if cflag:
+                m["copycat_flag"] = cflag
+            if ccant:
+                m["copycat_cant_check"] = ccant
         import solana_check
         return solana_check.check_solana(sys.modules[__name__], addr, m)
     addr = addr.lower()
     chain, m = market(addr, chain)
+    if m:
+        cflag, ccant = copycat.find_copycat_flag(addr, chain, m, http_json)
+        if cflag:
+            m["copycat_flag"] = cflag
+        if ccant:
+            m["copycat_cant_check"] = ccant
     cfg = CHAINS[chain]
     url = os.environ.get("RPC_" + chain.upper()) or cfg["rpc"]
     if "publicnode.com" in url and os.environ.get("PUBLICNODE_TOKEN") and not os.environ.get("RPC_" + chain.upper()):
@@ -1148,6 +1162,20 @@ def finish(r, rpc, addr, unit, total, burned, t0, head, logs=None, rug_from=None
         r.setdefault("extra_flags", []).extend(v4_flags)
         r["notes"].extend(v4_notes)
         r.setdefault("extra_flags", []).extend(liquidity_pulls(rpc, pools_all, addr, creator, scan_from, head, start))
+    extra_cant = []
+    try:
+        hp_flags, hp_cant = holder_patterns.evm_holder_pattern_flags(
+            rpc, addr, total, unit, m, logs if complete else None, replay_bal, pools_all, (r.get("launch") or {}).get("block_time_s")
+        )
+        r.setdefault("extra_flags", []).extend(hp_flags)
+        extra_cant.extend(hp_cant)
+    except (RuntimeError, OSError, urllib.error.HTTPError, urllib.error.URLError) as e:
+        extra_cant.append("Wallet-farm and fake-volume checks couldn't complete on this RPC "
+                          f"({type(e).__name__}); set PUBLICNODE_TOKEN (free at allnodes.com/publicnode).")
+    if m.get("copycat_flag"):
+        r.setdefault("extra_flags", []).append(m["copycat_flag"])
+    if m.get("copycat_cant_check"):
+        extra_cant.append(m["copycat_cant_check"])
     r["flags"] = flags(r)
     r["cant_check"] = [
         "Funding sent as tokens (USDC/USDT) rather than the native coin.",
@@ -1161,7 +1189,7 @@ def finish(r, rpc, addr, unit, total, burned, t0, head, logs=None, rug_from=None
         "one isn't counted among early buyers, funders or 'person' holders. 'person' means a plain wallet, which can also be a bot or an exchange.",
         "'Creator' means the wallet that sent the transaction that first minted the token. On launchpads that can be the "
         "launchpad's own wallet, not the person behind the coin.",
-    ]
+    ] + extra_cant
     return r
 
 

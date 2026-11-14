@@ -7,6 +7,7 @@ import collections
 import hashlib
 import os
 from concurrent.futures import ThreadPoolExecutor
+import holder_patterns
 
 SYSTEM = "11111111111111111111111111111111"
 PUMP = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
@@ -332,6 +333,13 @@ def check_solana(cc, mint, m):
         h["count"] = gt.get("count")
         h["distribution"] = gt.get("distribution_percentage")
     r["holders"] = h
+    hp_flags, hp_cant = holder_patterns.solana_holder_pattern_flags(
+        call, mint, total, m, pools | {curve} | ({creator} if creator else set()),
+        lambda wallets: account_kinds(call, wallets)
+    )
+    r["extra_flags"] += hp_flags
+    if m and m.get("copycat_flag"):
+        r["extra_flags"].append(m["copycat_flag"])
     r.setdefault("clusters", [])
     r["flags"] = cc.flags(r)
     r["cant_check"] = [
@@ -343,7 +351,7 @@ def check_solana(cc, mint, m):
         "'Creator' means the wallet that paid for the oldest transaction found for this mint; on launchpads other than "
         "pump.fun that can be the launchpad's own wallet.",
         "Only the first 3 minutes after creation are read (up to 150 transactions), so a busy launch is only partly covered.",
-    ]
+    ] + hp_cant + ([m["copycat_cant_check"]] if m and m.get("copycat_cant_check") else [])
     return r
 
 

@@ -1,0 +1,48 @@
+{
+  "pairs": [
+    {
+      "chainId": "solana",
+      "pairAddress": "8S8W9TfQqWfPe9sA3k2R8epn4mWKMn3QqYfD4E8abcde",
+      "pairCreatedAt": 1762444800000,
+      "fdv": 185000,
+      "baseToken": {
+        "address": "2T56GBrvcyeWWyhUAzsTFW4AcFag1nr7xyzrtZn7pump",
+        "name": "Affair Inu",
+        "symbol": "AI"
+      }
+    },
+    {
+      "chainId": "robinhood",
+      "pairAddress": "0x51fcb7041a1889f3524e8f89c9f5736b0d2b0001",
+      "pairCreatedAt": 1727740800000,
+      "fdv": 48200000,
+      "baseToken": {
+        "address": "0x2e8c31162b855a2ffa90f6f8634643ad6f111e18",
+        "name": "AI",
+        "symbol": "AI"
+      }
+    },
+    {
+      "chainId": "robinhood",
+      "pairAddress": "0x51fcb7041a1889f3524e8f89c9f5736b0d2b0002",
+      "pairCreatedAt": 1762012800000,
+      "fdv": 210000,
+      "baseToken": {
+        "address": "0xce8cfbd3776d8f6920757d3bb0d56a89bdf01e18",
+        "name": "AI Copy",
+        "symbol": "AI"
+      }
+    },
+    {
+      "chainId": "base",
+      "pairAddress": "0x51fcb7041a1889f3524e8f89c9f5736b0d2b0003",
+      "pairCreatedAt": 1761955200000,
+      "fdv": 340000,
+      "baseToken": {
+        "address": "0x7a3ec6281111111111111111111111111111aaaa",
+        "name": "AI Test",
+        "symbol": "AI"
+      }
+    }
+  ]
+}

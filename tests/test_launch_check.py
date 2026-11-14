@@ -1656,6 +1656,38 @@ class MarketData(unittest.TestCase):
         self.assertEqual(m["pairs_any"], [pool])
 
 
+class HolderPatternHookErrors(unittest.TestCase):
+    def test_finish_reports_allowed_holder_pattern_error_class(self):
+        saved = cc.holder_patterns.evm_holder_pattern_flags, cc.gt_holders
+
+        class FakeRpc:
+            pass
+
+        cc.holder_patterns.evm_holder_pattern_flags = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("rpc limit"))
+        cc.gt_holders = lambda chain, addr: None
+        try:
+            out = cc.finish({"address": "0x" + "ab" * 20, "chain": "base", "notes": [], "supply": {}, "market": {}},
+                            FakeRpc(), "0x" + "ab" * 20, 1, 1, 0, None, 1)
+        finally:
+            cc.holder_patterns.evm_holder_pattern_flags, cc.gt_holders = saved
+        self.assertTrue(any("RuntimeError" in c for c in out["cant_check"]), out["cant_check"])
+
+    def test_finish_does_not_swallow_unexpected_holder_pattern_error_type(self):
+        saved = cc.holder_patterns.evm_holder_pattern_flags, cc.gt_holders
+
+        class FakeRpc:
+            pass
+
+        cc.holder_patterns.evm_holder_pattern_flags = lambda *a, **k: (_ for _ in ()).throw(ValueError("bad"))
+        cc.gt_holders = lambda chain, addr: None
+        try:
+            with self.assertRaises(ValueError):
+                cc.finish({"address": "0x" + "ab" * 20, "chain": "base", "notes": [], "supply": {}, "market": {}},
+                          FakeRpc(), "0x" + "ab" * 20, 1, 1, 0, None, 1)
+        finally:
+            cc.holder_patterns.evm_holder_pattern_flags, cc.gt_holders = saved
+
+
 class ReportWording(unittest.TestCase):
     def fdv_flag(self, dex, real):
         r = {"supply": {"real_fdv": real}, "market": {"dex_fdv": dex}, "holders": {}}

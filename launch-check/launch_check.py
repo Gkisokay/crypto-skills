@@ -70,11 +70,18 @@ FUNDING_BUDGET_S = 60
 MONO = time.monotonic
 
 
-def http_json(url, body=None, tries=7):
+def http_json(url, body=None, tries=7, deadline=None):
     data = json.dumps(body).encode() if body is not None else None
     for i in range(tries):
+        if deadline is None:
+            timeout = 60
+        else:
+            left = deadline - MONO()
+            if left <= 0:
+                raise TimeoutError("RPC deadline reached")
+            timeout = max(min(left, 60), 0.05)
         try:
-            with urllib.request.urlopen(urllib.request.Request(url, data, UA), timeout=60) as r:
+            with urllib.request.urlopen(urllib.request.Request(url, data, UA), timeout=timeout) as r:
                 return json.load(r)
         # OSError covers URLError, timeouts (socket.timeout is not TimeoutError on Python 3.9), resets and TLS errors
         # raised while the body is read; HTTPException covers truncated replies
@@ -88,11 +95,22 @@ def http_json(url, body=None, tries=7):
             # publicnode answers 403, not 429, when it throttles
             if i == tries - 1 or (isinstance(e, urllib.error.HTTPError) and e.code not in (403, 429, 500, 502, 503, 504)):
                 raise
-            time.sleep(min(2 ** i, 30) * (0.5 + random.random()))  # jitter so parallel workers don't retry in step
+            wait = min(2 ** i, 30) * (0.5 + random.random())
+            if deadline is not None:
+                left = deadline - MONO()
+                if left <= 0:
+                    raise TimeoutError("RPC deadline reached")
+                wait = min(wait, left)
+            if wait > 0:
+                time.sleep(wait)  # jitter so parallel workers don't retry in step
 
 
 class Reverted(RuntimeError):
     """The contract call itself failed (not the RPC): don't retry it."""
+
+
+class PrunedState(RuntimeError):
+    """The RPC doesn't have historical state at that block."""
 
 
 class Rpc:
@@ -125,36 +143,59 @@ class Rpc:
         msg = msg.lower()
         return any(k in msg for k in ("max results", "more than", "too many results", "response size"))
 
-    def call(self, method, params):
+    @staticmethod
+    def _is_pruned_state(err):
+        msg = (err.get("message") if isinstance(err, dict) else str(err)) or ""
+        msg = msg.lower()
+        return any(k in msg for k in ("historical state", "missing trie node", "header not found", "state not available"))
+
+    @staticmethod
+    def _request(url, body, deadline=None):
+        return http_json(url, body, deadline=deadline)
+
+    @staticmethod
+    def _retry_sleep(i, deadline=None):
+        wait = min(2 ** i, 30) * (0.5 + random.random())
+        if deadline is not None:
+            left = deadline - MONO()
+            if left <= 0:
+                raise TimeoutError("RPC deadline reached")
+            wait = min(wait, left)
+        if wait > 0:
+            time.sleep(wait)
+
+    def call(self, method, params, deadline=None):
         for i in range(6):
             self._pace(1)
-            d = http_json(self.url, {"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
+            d = self._request(self.url, {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}, deadline=deadline)
             if "error" not in d:
                 return d["result"]
             err = d["error"]
             if self._is_revert(err):
                 raise Reverted(f"{method}: {err}")
+            if self._is_pruned_state(err):
+                raise PrunedState(f"{method}: {err}")
             msg = (err.get("message") if isinstance(err, dict) else str(err)) or ""
             if method == "eth_getLogs" and (self._is_logs_range_error(msg) or self._is_logs_max_results_error(msg)):
                 raise RuntimeError(f"{method}: {err}")
             if i == 5:
                 raise RuntimeError(f"{method}: {err}")
-            time.sleep(min(2 ** i, 30) * (0.5 + random.random()))
+            self._retry_sleep(i, deadline)
 
-    def _call_or_none(self, method, params):
+    def _call_or_none(self, method, params, deadline=None):
         try:
-            return self.call(method, params)
+            return self.call(method, params, deadline=deadline)
         except Reverted:
             return None  # same contract as a batch item: a reverted call reads as None
 
-    def _batch(self, part):
+    def _batch(self, part, deadline=None):
         body = [{"jsonrpc": "2.0", "id": j, "method": m, "params": p} for j, (m, p) in enumerate(part)]
         last = None
         for i in range(6):
             self._pace(len(part))
-            res = http_json(self.url, body)
+            res = self._request(self.url, body, deadline=deadline)
             if not isinstance(res, list):  # some RPCs don't take batches
-                return [self._call_or_none(m, p) for m, p in part]
+                return [self._call_or_none(m, p, deadline=deadline) for m, p in part]
             got = {}
             retry = False
             errs = []
@@ -168,6 +209,8 @@ class Rpc:
                 err = x["error"]
                 if self._is_revert(err):
                     got[idx] = None
+                elif self._is_pruned_state(err):
+                    raise PrunedState(f"{part[idx][0]}: {err}")
                 else:
                     retry = True
                     errs.append(err)
@@ -175,14 +218,14 @@ class Rpc:
                 return [got[j] for j in range(len(part))]
             last = errs or [x["error"] for x in res if "error" in x]
             # an item that errored (often a per-item rate limit) would otherwise read as an empty block
-            time.sleep(min(2 ** i, 30) * (0.5 + random.random()))
+            self._retry_sleep(i, deadline)
         raise RuntimeError(f"batch kept failing: {last[:1]}")
 
-    def batch(self, calls, size=None):
+    def batch(self, calls, size=None, deadline=None):
         size = size or self.batch_size
         parts = [calls[i:i + size] for i in range(0, len(calls), size)]
         with ThreadPoolExecutor(self.workers) as ex:
-            return [x for part in ex.map(self._batch, parts) for x in part]
+            return [x for part in ex.map(lambda p: self._batch(p, deadline=deadline), parts) for x in part]
 
     def _range(self, flt, a, b):
         try:
@@ -1017,6 +1060,9 @@ def first_funders(rpc, wallets, t0, end, bt, r):
     scanning blocks in the FUNDING_LOOKBACK_S before the launch."""
     stop = MONO() + FUNDING_BUDGET_S
     timed_out = False
+    call_count = 0
+    balance_search_s = 0.0
+    block_scan_s = 0.0
 
     def out_of_time():
         return MONO() >= stop
@@ -1025,27 +1071,80 @@ def first_funders(rpc, wallets, t0, end, bt, r):
         r.setdefault("notes", []).append(f"Funding lookups stopped after {FUNDING_BUDGET_S} s (slow RPC); {traced} of {len(wallets)} early buyers traced. "
                                          "A faster RPC (RPC_<CHAIN>) traces the rest.")
 
+    def set_timing():
+        r.setdefault("launch", {})["funding_timing"] = {"balance_search_s": round(balance_search_s, 3),
+                                                        "block_scan_s": round(block_scan_s, 3),
+                                                        "calls": call_count}
+
+    def batch_with_retry(reqs):
+        """Keep binary search on the fast path if one large batch fails transiently."""
+        nonlocal call_count
+
+        def batch_once(part):
+            nonlocal call_count
+            call_count += 1
+            return rpc.batch(part, deadline=stop)
+
+        try:
+            return batch_once(reqs)
+        except PrunedState:
+            raise
+        except TimeoutError:
+            raise
+        except RuntimeError:
+            if len(reqs) <= 1:
+                raise
+            out = []
+            step = max((getattr(rpc, "batch_size", 20) or 20) // 2, 1)
+            for i in range(0, len(reqs), step):
+                part = reqs[i:i + step]
+                try:
+                    out += batch_once(part)
+                except PrunedState:
+                    raise
+                except TimeoutError:
+                    raise
+                except RuntimeError:
+                    if not hasattr(rpc, "call"):
+                        raise
+                    for method, params in part:
+                        call_count += 1
+                        out.append(rpc.call(method, params, deadline=stop))
+            return out
+
     lo0 = max(t0 - int(FUNDING_LOOKBACK_DAYS * 86400 / bt), 1)
     lo = {w: lo0 for w in wallets}
     hi = {w: end for w in wallets}  # buyers still hold gas money at the end of the launch window
     found = None
-    try:
-        while any(lo[w] < hi[w] for w in wallets):
-            if out_of_time():
-                timed_out = True
-                break
-            todo = [w for w in wallets if lo[w] < hi[w]]
-            mids = {w: (lo[w] + hi[w]) // 2 for w in todo}
-            res = rpc.batch([("eth_getBalance", [w, hex(mids[w])]) for w in todo])
-            for w, x in zip(todo, res):
-                if int(x, 16) > 0:
-                    hi[w] = mids[w]
-                else:
-                    lo[w] = mids[w] + 1
-        found = {w: lo[w] for w in wallets if lo[w] == hi[w]}
-        r["launch"]["funding_method"] = f"first-funded block per wallet, up to {FUNDING_LOOKBACK_DAYS} days back"
-    except RuntimeError:  # pruned state: scan the blocks just before launch instead
-        found = None
+    if not getattr(rpc, "_funding_balance_pruned", False):
+        bal_started = MONO()
+        try:
+            try:
+                while any(lo[w] < hi[w] for w in wallets):
+                    if out_of_time():
+                        timed_out = True
+                        break
+                    todo = [w for w in wallets if lo[w] < hi[w]]
+                    mids = {w: (lo[w] + hi[w]) // 2 for w in todo}
+                    try:
+                        res = batch_with_retry([("eth_getBalance", [w, hex(mids[w])]) for w in todo])
+                    except TimeoutError:
+                        timed_out = True
+                        break
+                    for w, x in zip(todo, res):
+                        if int(x, 16) > 0:
+                            hi[w] = mids[w]
+                        else:
+                            lo[w] = mids[w] + 1
+                found = {w: lo[w] for w in wallets if lo[w] == hi[w]}
+                r["launch"]["funding_method"] = f"first-funded block per wallet, up to {FUNDING_LOOKBACK_DAYS} days back"
+            except PrunedState:  # no archive state at old blocks: switch to block scans for this RPC
+                rpc._funding_balance_pruned = True
+                found = None
+            except RuntimeError:
+                found = None
+        finally:
+            balance_search_s += max(MONO() - bal_started, 0.0)
     sends, unresolved, traced = [], 0, set()
     why = r["launch"].setdefault("funding_unresolved", collections.Counter())
     if found:
@@ -1057,7 +1156,11 @@ def first_funders(rpc, wallets, t0, end, bt, r):
                 timed_out = True
                 break
             part = blocks[i:i + step]
-            got = rpc.batch([("eth_getBlockByNumber", [hex(b), True]) for b in part])
+            try:
+                got = batch_with_retry([("eth_getBlockByNumber", [hex(b), True]) for b in part])
+            except TimeoutError:
+                timed_out = True
+                break
             txs.update(zip(part, got))
         by_block = collections.defaultdict(list)
         for w, b in found.items():
@@ -1083,25 +1186,37 @@ def first_funders(rpc, wallets, t0, end, bt, r):
         unresolved += len(set(wallets) - set(found))
         if timed_out:
             timeout_note(len(traced))
+        set_timing()
         return sends, unresolved
     pre = int(FUNDING_LOOKBACK_S / bt)
     span = list(range(max(t0 - pre, 0), t0 + 1))[-MAX_FUND_BLOCKS:]
     r["launch"]["funding_method"] = f"block scan of the {len(span)} blocks (~{len(span) * bt / 60:.0f} min) before launch"
     seen = set()
+    wallet_set = set(wallets)
     step = max(getattr(rpc, "batch_size", 20) or 20, 1)
-    for i in range(0, len(span), step):
-        if out_of_time():
-            timed_out = True
-            break
-        part = span[i:i + step]
-        for blk in rpc.batch([("eth_getBlockByNumber", [hex(n), True]) for n in part]):
-            for tx in (blk or {}).get("transactions", []):
-                to = (tx.get("to") or "").lower()
-                if to in lo and int(tx["value"], 16) > 0:
-                    sends.append((tx["from"].lower(), to))
-                    seen.add(to)
+    scan_started = MONO()
+    try:
+        for i in range(0, len(span), step):
+            if out_of_time():
+                timed_out = True
+                break
+            part = span[i:i + step]
+            try:
+                got = batch_with_retry([("eth_getBlockByNumber", [hex(n), True]) for n in part])
+            except TimeoutError:
+                timed_out = True
+                break
+            for blk in got:
+                for tx in (blk or {}).get("transactions", []):
+                    to = (tx.get("to") or "").lower()
+                    if to in wallet_set and int(tx["value"], 16) > 0:
+                        sends.append((tx["from"].lower(), to))
+                        seen.add(to)
+    finally:
+        block_scan_s += max(MONO() - scan_started, 0.0)
     if timed_out:
         timeout_note(len(seen))
+    set_timing()
     return sends, len(set(wallets) - seen)
 
 

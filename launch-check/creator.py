@@ -6,9 +6,11 @@ import collections
 import time
 
 
-MAX_HISTORY_CALLS = 12
-MAX_HISTORY_SECONDS = 12
+MAX_HISTORY_CALLS = 25
+MAX_HISTORY_SECONDS = 15
 MAX_HISTORY_CHECKED = 10
+MAX_HISTORY_LAUNCHES = 20  # enough to call a wallet a serial launcher; stop reading there
+SERIAL_LAUNCHER_MIN = 3  # fewer other launches is a note, not a red flag
 LOW_FDV_USD = 5_000
 HISTORY_WINDOW_DAYS = 30
 MAX_EXIT_RECEIPTS = 5
@@ -166,7 +168,7 @@ def fetch_dex_metrics(cc, chain, addresses):
     return out
 
 
-def summarize_creator_history(creator, launch_ts, launches, metrics, chain):
+def summarize_creator_history(creator, launch_ts, launches, metrics, chain, partial=False):
     if not launches:
         return None, None
     launches = sorted(launches, key=lambda x: x.get("ts") or 0, reverse=True)
@@ -175,22 +177,34 @@ def summarize_creator_history(creator, launch_ts, launches, metrics, chain):
     lo_txt = time.strftime("%Y-%m-%d", time.gmtime(low or launch_ts))
     hi_txt = time.strftime("%Y-%m-%d", time.gmtime(high or launch_ts))
     checked = launches[:MAX_HISTORY_CHECKED]
-    under = 0
+    under = unlisted = 0
     rows = []
     for x in checked:
         a = _norm(chain, x.get("address"))
         m = metrics.get(a) or {}
         fdv = m.get("fdv")
         liq = m.get("liquidity")
-        if fdv is not None and fdv < LOW_FDV_USD:
+        if fdv is None:
+            unlisted += 1
+        elif fdv < LOW_FDV_USD:
             under += 1
         fdv_txt = "FDV n/a" if fdv is None else f"FDV ${fdv:,.0f}"
         liq_txt = "liq n/a" if liq is None else f"liq ${liq:,.0f}"
         rows.append(f"{x.get('address')} ({fdv_txt}, {liq_txt})")
-    flag = (f"This creator wallet {creator} launched {len(launches)} other coins between {lo_txt} and {hi_txt}; "
-            f"{under} of the {len(checked)} checked are under $5K FDV now.")
+    if len(launches) >= MAX_HISTORY_LAUNCHES:
+        n = f"{MAX_HISTORY_LAUNCHES}+"
+    elif partial:
+        n = f"at least {len(launches)}"
+    else:
+        n = str(len(launches))
+    coins = "coin" if len(launches) == 1 else "coins"
+    span = lo_txt if lo_txt == hi_txt else f"{lo_txt} to {hi_txt}"
+    text = (f"This creator wallet {creator} launched {n} other {coins} ({span}); of the {len(checked)} checked, "
+            f"{under} are under $5K FDV now and {unlisted} have no DexScreener market.")
     note = "Creator history sample (newest first): " + "; ".join(rows)
-    return flag, note
+    if len(launches) < SERIAL_LAUNCHER_MIN:
+        return None, text + " " + note
+    return text, note
 
 
 def creator_exit_solana(cc, txs, mint, creator, launch_total, launch_ts, pool_owners):
@@ -368,14 +382,15 @@ def _solana_history_launches(call, creator, current_mint, launch_ts, stop):
     calls = 0
     partial = None
     lo_ts = launch_ts - HISTORY_WINDOW_DAYS * 86400
-    hi_ts = launch_ts + HISTORY_WINDOW_DAYS * 86400
+    hi_ts = launch_ts + 86400  # newest first from a day after launch: the launches before it matter most
     while calls < MAX_HISTORY_CALLS and time.monotonic() < stop:
         opts = {
             "transactionDetails": "full",
             "sortOrder": "desc",
             "limit": 100,
             "encoding": "jsonParsed",
-            "maxSupportedTransactionVersion": 0,
+            "maxSupportedTransactionVersion": 1,
+            "filters": {"blockTime": {"gte": lo_ts, "lte": hi_ts}},
         }
         if token:
             opts["paginationToken"] = token
@@ -383,6 +398,7 @@ def _solana_history_launches(call, creator, current_mint, launch_ts, stop):
         calls += 1
         data = page.get("data") or []
         if not data:
+            token = None
             break
         old_reached = False
         for tx in data:
@@ -398,7 +414,9 @@ def _solana_history_launches(call, creator, current_mint, launch_ts, stop):
                 if mint != current_mint and mint not in launches:
                     launches[mint] = ts
         token = page.get("paginationToken")
-        if old_reached or not token:
+        if old_reached or len(launches) >= MAX_HISTORY_LAUNCHES:
+            token = None
+        if not token:
             break
     if token:
         partial = f"Creator history reached the time/call budget after {calls} calls; checked {len(launches)} launches so far."
@@ -451,8 +469,8 @@ def add_solana_creator_checks(cc, call, rpc_url, r, mint, creator, launch_ts, la
         line = creator_exit_solana(cc, txs, mint, creator, launch_total, launch_ts, pool_owners or set())
         if line:
             r.setdefault("extra_flags", []).append(line)
-    except Exception as e:
-        cant.append(f"Creator exit check couldn't finish: {type(e).__name__}")
+    except (RuntimeError, OSError, ValueError, KeyError) as e:
+        cant.append(f"Creator exit check couldn't finish: {type(e).__name__}: {str(e)[:120]}")
 
     deadline = time.monotonic() + MAX_HISTORY_SECONDS
     launches = []
@@ -463,10 +481,7 @@ def add_solana_creator_checks(cc, call, rpc_url, r, mint, creator, launch_ts, la
         if "helius" not in (rpc_url or "").lower():
             cant.append("Creator history on Solana wasn't checked with the public RPC; set HELIUS_API_KEY (free at helius.dev).")
         else:
-            cant.append(f"Creator history check couldn't finish: {type(e).__name__}")
-        return cant
-    except Exception as e:
-        cant.append(f"Creator history check couldn't finish: {type(e).__name__}")
+            cant.append(f"Creator history check couldn't finish: {type(e).__name__}: {str(e)[:120]}")
         return cant
 
     if launches:
@@ -476,7 +491,7 @@ def add_solana_creator_checks(cc, call, rpc_url, r, mint, creator, launch_ts, la
             metrics = fetch_dex_metrics(cc, "solana", [x["address"] for x in checked])
         except (OSError, RuntimeError, ValueError, TypeError):
             r.setdefault("notes", []).append("Creator history found launches, but DexScreener metrics were unavailable this run.")
-        flag, note = summarize_creator_history(creator, launch_ts, launches, metrics, "solana")
+        flag, note = summarize_creator_history(creator, launch_ts, launches, metrics, "solana", bool(partial))
         if flag:
             r.setdefault("extra_flags", []).append(flag)
         if note:
@@ -506,8 +521,8 @@ def add_evm_creator_checks(cc, rpc, r, token, mint_tx_hash, t0, t0_ts, head, uni
             r.setdefault("extra_flags", []).append(move_line)
         if receipt_cant:
             cant.append(receipt_cant)
-    except Exception as e:
-        cant.append(f"Creator exit check couldn't finish: {type(e).__name__}")
+    except (RuntimeError, OSError, ValueError, KeyError) as e:
+        cant.append(f"Creator exit check couldn't finish: {type(e).__name__}: {str(e)[:120]}")
 
     deadline = time.monotonic() + MAX_HISTORY_SECONDS
     launches, partial = [], None
@@ -528,9 +543,7 @@ def add_evm_creator_checks(cc, rpc, r, token, mint_tx_hash, t0, t0_ts, head, uni
             "Creator history on this EVM chain wasn't checked because this RPC has no trace API; "
             "set RPC_<CHAIN> to a tracing endpoint (PUBLICNODE_TOKEN helps with archive reads on supported chains)."
         )
-        cant.append(f"Creator history check couldn't finish: {type(e).__name__}")
-    except Exception as e:
-        cant.append(f"Creator history check couldn't finish: {type(e).__name__}")
+        cant.append(f"Creator history check couldn't finish: {type(e).__name__}: {str(e)[:120]}")
     if launches:
         checked = sorted(launches, key=lambda x: x["ts"], reverse=True)[:MAX_HISTORY_CHECKED]
         metrics = {}

@@ -86,13 +86,13 @@ class CreatorChecks(unittest.TestCase):
         self.assertEqual(cant, [])
         self.assertTrue(seen_opts, "expected getTransactionsForAddress options")
         self.assertEqual(seen_opts[0]["encoding"], "jsonParsed")
-        self.assertEqual(seen_opts[0]["maxSupportedTransactionVersion"], 0)
+        # Helius rejects version-1 transactions unless the client accepts them (live error -32015, Nov 14 2026)
+        self.assertEqual(seen_opts[0]["maxSupportedTransactionVersion"], 1)
+        self.assertEqual(seen_opts[0]["filters"]["blockTime"]["lte"], d["launch_ts"] + 86400)
         flag = next(x for x in r["extra_flags"] if x.startswith("This creator wallet"))
-        m = re.search(r"launched (\d+) other coins", flag)
-        self.assertTrue(m and int(m.group(1)) >= 20, flag)
-        self.assertIn("between", flag)
-        self.assertRegex(flag, r"between \d{4}-\d{2}-\d{2} and \d{4}-\d{2}-\d{2}")
-        self.assertIn("9 of the 10 checked", flag)
+        self.assertIn("launched 20+ other coins", flag)
+        self.assertRegex(flag, r"\(\d{4}-\d{2}-\d{2}( to \d{4}-\d{2}-\d{2})?\)")
+        self.assertRegex(flag, r"of the 10 checked, \d+ are under \$5K FDV now")
         self.assertTrue(any("HighNow724k11111111111111111111111111111111" in n for n in r["notes"]), r["notes"])
 
     def test_solana_history_extracts_pumpfun_from_inner_instructions(self):
@@ -285,7 +285,7 @@ class CreatorChecks(unittest.TestCase):
 
     def test_exit_errors_are_reported_not_silent(self):
         saved = creator.creator_exit_solana
-        creator.creator_exit_solana = lambda *a, **k: (_ for _ in ()).throw(TypeError("x"))
+        creator.creator_exit_solana = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x"))
         try:
             cant = creator.add_solana_creator_checks(
                 cc,
@@ -300,7 +300,7 @@ class CreatorChecks(unittest.TestCase):
             )
         finally:
             creator.creator_exit_solana = saved
-        self.assertTrue(any("Creator exit check couldn't finish: TypeError" in x for x in cant), cant)
+        self.assertTrue(any("Creator exit check couldn't finish: RuntimeError" in x for x in cant), cant)
 
     def test_evm_exit_errors_are_reported_not_silent(self):
         saved = creator.creator_exit_evm

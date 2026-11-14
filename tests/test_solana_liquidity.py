@@ -88,15 +88,12 @@ class SolanaLiquidity(unittest.TestCase):
                 return tx_by_sig.get(params[0])
             if method == "getTokenAccountsByOwner":
                 owner, flt = params[0], params[1]
+                if len(params) < 3 or params[2].get("encoding") != "jsonParsed":
+                    raise RuntimeError("getTokenAccountsByOwner: Encoded binary (base 58) data should be less than 128 bytes")
                 if owner == pool and flt.get("mint") == quote_mint:
-                    return {"value": [{"pubkey": "vault-1"}]}
+                    return {"value": [{"pubkey": "vault-1", "account": {"data": {"parsed": {"info": {
+                        "mint": quote_mint, "tokenAmount": {"uiAmount": now_quote}}}}}}]}
                 return {"value": []}
-            if method == "getTokenAccountBalance":
-                if params[0] == "vault-1":
-                    return {"value": {"uiAmount": now_quote}}
-                raise AssertionError(params[0])
-            if method == "getBalance":
-                return {"value": int(now_quote * 1_000_000_000)}
             raise AssertionError((method, params))
 
         return call, calls

@@ -128,18 +128,11 @@ def _best_quote_mint(mint, pool, txs):
 
 
 def _current_quote_balance(call, pool, quote_mint):
-    if quote_mint == SOL_MINT:
-        return float((call("getBalance", [pool]).get("value") or 0) / 1_000_000_000.0)
-    owned = call("getTokenAccountsByOwner", [pool, {"mint": quote_mint}]).get("value") or []
-    if not owned:
-        return 0.0
+    owned = call("getTokenAccountsByOwner", [pool, {"mint": quote_mint}, {"encoding": "jsonParsed"}]).get("value") or []
     total = 0.0
     for row in owned:
-        pub = row.get("pubkey")
-        if not pub:
-            continue
-        bal = call("getTokenAccountBalance", [pub]).get("value") or {}
-        total += float(bal.get("uiAmount") or 0.0)
+        info = ((((row.get("account") or {}).get("data") or {}).get("parsed") or {}).get("info") or {})
+        total += float((info.get("tokenAmount") or {}).get("uiAmount") or 0.0)
     return total
 
 
@@ -367,7 +360,8 @@ def apply_solana_checks(call, mint, pools, creator, launch_ts, total_supply, too
             flags.append(pulled["text"])
     insiders = launch_insiders(creator, bundle_wallets, clusters)
     try:
-        flags.extend(insider_exit_summary(call, mint, total_supply, launch_ts, creator, took_by_wallet,
+        # creator.py reports the creator's own exit; this adds only the tied wallets' aggregate
+        flags.extend(insider_exit_summary(call, mint, total_supply, launch_ts, None, took_by_wallet,
                                           insiders - ({creator} if creator else set()), set(pools or []), launch_txs))
     except RuntimeError:
         notes.append("Couldn't check creator post-launch exits: creator transaction history couldn't be read from this RPC.")

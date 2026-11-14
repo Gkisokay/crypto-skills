@@ -15,7 +15,7 @@ import urllib.error
 
 WALLET_FARM_MIN_WALLETS = 20
 WALLET_FARM_SLICE_TOLERANCE = 0.15
-WALLET_FARM_MIN_GROUP_SHARE = 0.35
+WALLET_FARM_MIN_GROUP_SHARE = 0.25
 WALLET_FARM_MIN_SLICE_SHARE = 0.0075
 WALLET_FARM_SAMPLE = 20
 WALLET_FARM_TX_DETAIL_SAMPLE = 20
@@ -321,9 +321,11 @@ def _solana_holders(call, mint):
     for program in SOLANA_TOKEN_PROGRAMS:
         if time.monotonic() - t0 > SOLANA_HOLDER_READ_BUDGET_S:
             raise RuntimeError("solana holder scan exceeded time budget")
-        rows = call("getProgramAccounts", [program, {"encoding": "jsonParsed", "filters": [
-            {"dataSize": 165}, {"memcmp": {"offset": 0, "bytes": mint}}
-        ]}])
+        # Token-2022 accounts carry extensions (170+ bytes), so only classic SPL accounts have a fixed size
+        filters = [{"memcmp": {"offset": 0, "bytes": mint}}]
+        if program == SOLANA_TOKEN_PROGRAMS[0]:
+            filters.insert(0, {"dataSize": 165})
+        rows = call("getProgramAccounts", [program, {"encoding": "jsonParsed", "filters": filters}])
         if time.monotonic() - t0 > SOLANA_HOLDER_READ_BUDGET_S:
             raise RuntimeError("solana holder scan exceeded time budget")
         for row in rows or []:

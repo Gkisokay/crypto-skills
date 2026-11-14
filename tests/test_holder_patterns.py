@@ -123,6 +123,23 @@ class HolderPatterns(unittest.TestCase):
         self.assertTrue(any("wallets hold" in f for f in flags), flags)
         self.assertLessEqual(len(calls), 45, len(calls))
 
+    def test_solana_token2022_holders_are_read_without_size_filter(self):
+        # Token-2022 accounts are 170+ bytes; a dataSize=165 filter returns none of them (inuhao, Nov 14 2026)
+        rows = [{"account": {"data": {"parsed": {"info": {"owner": f"W{i:02d}", "tokenAmount": {"uiAmount": 20.0}}}}}}
+                for i in range(25)]
+
+        def call(method, params):
+            if method == "getProgramAccounts":
+                program, flt = params[0], params[1]["filters"]
+                sized = any("dataSize" in f for f in flt)
+                if program == hp.SOLANA_TOKEN_PROGRAMS[1]:
+                    return [] if sized else rows
+                return []
+            return []
+
+        balances = hp._solana_holders(call, "MINT")
+        self.assertEqual(len(balances), 25)
+
     def test_solana_unexpected_error_type_is_not_swallowed(self):
         def call(method, params):
             if method == "getProgramAccounts":

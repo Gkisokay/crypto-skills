@@ -90,13 +90,13 @@ class RpcBatch(unittest.TestCase):
         # Robinhood's RPC rate-limits single items inside a batch (Nov 10); those must not become empty blocks
         replies = [[{"id": 0, "result": "0x1"}, {"id": 1, "error": {"code": 429}}],
                    [{"id": 0, "result": "0x1"}, {"id": 1, "result": "0x2"}]]
-        cc.http_json = lambda url, body=None: replies.pop(0)
+        cc.http_json = lambda url, body=None, **kw: replies.pop(0)
         self.assertEqual(cc.Rpc("u", 1000, 1).batch([("m", []), ("m", [])]), ["0x1", "0x2"])
 
     def test_reverted_item_returns_none_without_retry(self):
         calls = []
 
-        def one_revert(url, body=None):
+        def one_revert(url, body=None, **kw):
             calls.append((url, body))
             return [{"id": 1, "result": "0x2"}, {"id": 0, "error": {"code": 3, "message": "execution reverted"}}]
 
@@ -124,7 +124,7 @@ class RpcCall(unittest.TestCase):
     def test_execution_reverted_is_not_retried(self):
         calls = []
 
-        def reverted(url, body=None):
+        def reverted(url, body=None, **kw):
             calls.append((url, body))
             return {"jsonrpc": "2.0", "id": 1, "error": {"code": 3, "message": "execution reverted"}}
 
@@ -136,7 +136,7 @@ class RpcCall(unittest.TestCase):
     def test_logs_range_limit_error_is_not_retried(self):
         calls = []
 
-        def limited(url, body=None):
+        def limited(url, body=None, **kw):
             calls.append((url, body))
             return {"jsonrpc": "2.0", "id": 1, "error": {"code": -32602, "message": "query spans 13223085 blocks; narrow the block range"}}
 
@@ -186,10 +186,10 @@ class NoArchive(unittest.TestCase):
             def eth_call(self, to, data):
                 return "0x12" if data == "0x313ce567" else hex(10**27)
 
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 return ["0x0"] * len(calls)
 
-            def call(self, method, params):
+            def call(self, method, params, deadline=None):
                 return "0x3556f6d"
 
             def block_ts(self, n):
@@ -237,7 +237,7 @@ class AgeGate(unittest.TestCase):
                     return "0x0"
                 raise AssertionError((to, data))
 
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 out = []
                 for m, p in calls:
                     if m == "eth_call":
@@ -246,7 +246,7 @@ class AgeGate(unittest.TestCase):
                         raise AssertionError((m, p))
                 return out
 
-            def call(self, method, params):
+            def call(self, method, params, deadline=None):
                 if method == "eth_blockNumber":
                     return hex(2_000_000)
                 raise AssertionError((method, params))
@@ -313,7 +313,7 @@ class MintMissingRugChecks(unittest.TestCase):
                     return "0x0"
                 raise AssertionError((to, data))
 
-            def call(self, method, params):
+            def call(self, method, params, deadline=None):
                 if method == "eth_blockNumber":
                     return hex(1_000_000)
                 raise AssertionError((method, params))
@@ -344,7 +344,7 @@ class MintMissingRugChecks(unittest.TestCase):
                     }], True
                 raise AssertionError((flt, frm, to, cap))
 
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 out = []
                 for m, p in calls:
                     if m == "eth_call":
@@ -377,7 +377,7 @@ class FirstFunders(unittest.TestCase):
         funded = {"0xa": 86643, "0xb": 87116}
 
         class FakeRpc:
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 out = []
                 for m, p in calls:
                     if m == "eth_getBalance":
@@ -403,7 +403,7 @@ class FirstFunders(unittest.TestCase):
         class FakeRpc:
             batch_size = 1
 
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 out = []
                 for m, p in calls:
                     if m == "eth_getBalance":
@@ -434,7 +434,7 @@ class FirstFunders(unittest.TestCase):
         class FakeRpc:
             batch_size = 1
 
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 out = []
                 for m, p in calls:
                     if m == "eth_getBalance":
@@ -765,7 +765,7 @@ class Multisend(unittest.TestCase):
         funded = {"0xa": 500, "0xb": 500, "0xc": 500, "0xd": 700}
 
         class FakeRpc:
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 out = []
                 for m, p in calls:
                     if m == "eth_getBalance":
@@ -829,7 +829,7 @@ class LiquidityPulls(unittest.TestCase):
                     return "0x" + hex(32)[2:].zfill(64) + hex(4)[2:].zfill(64) + b"WETH".hex().ljust(64, "0")
                 return hex(pool_weth)  # balanceOf(pool)
 
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 return [{"from": (senders or {}).get(c[1][0], t.LP_REMOVER)} for c in calls]
 
             def block_ts(self, n):
@@ -974,7 +974,7 @@ class LpControl(unittest.TestCase):
                     raise AssertionError((topics, frm, to, cap))
                 return [x for x in source if x["address"] in addrs], True
 
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 out = []
                 for method, params in calls:
                     if method == "eth_getCode":
@@ -1097,7 +1097,7 @@ class LpControl(unittest.TestCase):
         w3 = "0x3333333333333333333333333333333333333333"
 
         class FakeRpc:
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 return ["0x"] * len(calls)
 
         flags, _ = cc.lp_findings(FakeRpc(), self.POOL, self.CREATOR, {w1: 34, w2: 33, w3: 33}, 100, 0.0, "v2")
@@ -1114,7 +1114,7 @@ class DustPools(unittest.TestCase):
         saved = cc.lp_control, cc.liquidity_pulls, cc.lp_control_v4, cc.gt_holders, cc.v4_manager
 
         class FakeRpc:
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 return []
 
         def lp_control(rpc, pools, creator, frm, to):
@@ -1152,7 +1152,7 @@ class DustPools(unittest.TestCase):
         saved = cc.lp_control, cc.liquidity_pulls, cc.lp_control_v4, cc.gt_holders, cc.v4_manager
 
         class FakeRpc:
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 return []
 
         def lp_control(rpc, pools, creator, frm, to):
@@ -1221,7 +1221,7 @@ class BundleTiming(unittest.TestCase):
         saved = cc.lp_control, cc.lp_control_v4, cc.liquidity_pulls, cc.gt_holders, cc.v4_manager
 
         class FakeRpc:
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 return ["0x0"] * len(calls)
 
         cc.lp_control = lambda *a, **k: ([], [])
@@ -1250,7 +1250,7 @@ class BundleTiming(unittest.TestCase):
             logs.append({"topics": [cc.TRANSFER, "0x" + "0" * 24 + w[2:], "0x" + "0" * 24 + recv[2:]], "data": hex(4)})
 
         class FakeRpc:
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 return ["0x"] * len(calls)
 
         note = cc.wallet_flow_note(FakeRpc(), "0x" + "ab" * 20, ws, 100.0, 1, True, logs, cc.replay(logs), set())
@@ -1285,7 +1285,7 @@ class HolderKinds(unittest.TestCase):
                     return token_logs, True
                 raise AssertionError((flt, frm, to, cap))
 
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 out = []
                 for m, p in calls:
                     if m == "eth_getCode":
@@ -1386,7 +1386,7 @@ class V4Pools(unittest.TestCase):
                     return manager_logs, True
                 raise AssertionError((flt, frm, to, cap))
 
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 out = []
                 for method, params in calls:
                     if method == "eth_getTransactionReceipt":
@@ -1618,7 +1618,7 @@ class MarketData(unittest.TestCase):
 
     def market(self, pairs):
         saved = cc.http_json
-        cc.http_json = lambda url, body=None, tries=7: {"pairs": pairs}
+        cc.http_json = lambda url, body=None, tries=7, **kw: {"pairs": pairs}
         try:
             return cc.market(self.TOKEN, "base")[1]
         finally:
@@ -1647,7 +1647,7 @@ class MarketData(unittest.TestCase):
     def test_solana_pool_addresses_keep_their_case(self):
         mint, pool = "DDmGnuvroxVrb7CSyjYcezFU8gnAfhKasg4ZZezmpump", "CJyaPwhfcRHL57Nrmr4yTV2egpWoGx9ZeKQjScDfi3Hd"
         saved = cc.http_json
-        cc.http_json = lambda url, body=None, tries=7: {"pairs": [{
+        cc.http_json = lambda url, body=None, tries=7, **kw: {"pairs": [{
             "chainId": "solana", "pairAddress": pool, "baseToken": {"address": mint, "symbol": "T"}, "priceUsd": "1"}]}
         try:
             m = cc.market(mint, "solana")[1]

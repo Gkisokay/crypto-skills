@@ -289,18 +289,8 @@ def evm_holder_pattern_flags(rpc, token, total_supply, unit, market, logs, repla
                 sampled = [w for w in group["wallets"][:WALLET_FARM_SAMPLE] if w in first_receive]
                 funders = _scan_evm_funders_one_hop(rpc, first_receive, sampled, launch_block_time_s or 2.0)
                 flags.append(wallet_farm_flag(group, sampled, funders, tx_count_by_wallet))
-
-        stats = _evm_pool_flow_stats(logs, pools, unit)
-        if stats:
-            active = sorted(stats.items(), key=lambda x: x[1]["swaps"], reverse=True)[:80]
-            if active:
-                codes = rpc.batch([("eth_getCode", [w, "latest"]) for w, _ in active])
-                person_stats = {w: s for (w, s), c in zip(active, codes) if c in (None, "0x") or str(c).startswith("0xef0100")}
-                vol_flag = fake_volume_flag_from_stats(person_stats)
-                if vol_flag:
-                    flags.append(vol_flag)
     else:
-        cant.append("Wallet-farm and fake-volume checks need a full holder replay; this coin exceeded the transfer replay cap on this RPC. "
+        cant.append("The wallet-farm check needs a full holder replay; this coin exceeded the transfer replay cap on this RPC. "
                     "Set PUBLICNODE_TOKEN (free at allnodes.com/publicnode) for deeper history on supported EVM chains.")
     return flags, cant
 
@@ -429,11 +419,4 @@ def solana_holder_pattern_flags(call, mint, total_supply, market, excluded_walle
                     cant.append("Wallet-farm one-hop sampling on Solana hit RPC limits "
                                 f"({type(e).__name__}); set HELIUS_API_KEY (free at helius.dev).")
                 flags.append(wallet_farm_flag(group, sampled, funders, tx_counts))
-
-    try:
-        vflag = _solana_fake_volume_flag(call, mint, kind_lookup)
-        if vflag:
-            flags.append(vflag)
-    except rpc_errors as e:
-        cant.append(f"Fake-volume check on Solana hit RPC limits ({type(e).__name__}); set HELIUS_API_KEY (free at helius.dev).")
     return flags, cant

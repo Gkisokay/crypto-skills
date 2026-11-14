@@ -40,8 +40,7 @@ Paste a token address, get back:
 - **Contract traps (EVM):** a simulated sell (honeypot, sell tax), owner-only mint, blacklist and pause functions, and
   upgradeable proxies. **Token traps (Solana):** mint and freeze authority, and Token-2022 extensions that can block
   transfers or take fees.
-- **Fake market cap and fake volume:** FDV far above what the liquidity supports, and volume from a few wallets
-  trading back and forth.
+- **Fake market cap:** FDV far above what the liquidity supports.
 - **Copycat names:** same name or ticker as a bigger, older coin.
 - **Solana liquidity pulls** from PumpSwap, Meteora and Raydium CPMM pools.
 

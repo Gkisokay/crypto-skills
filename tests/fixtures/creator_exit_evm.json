@@ -1,0 +1,39 @@
+{
+  "creator": "0x1111111111111111111111111111111111111111",
+  "pool": "0x2222222222222222222222222222222222222222",
+  "create_tx": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "exit_tx": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "total_supply": 1000000.0,
+  "unit": 1,
+  "launch_ts": 1700000000,
+  "block_ts": {
+    "100": 1700000000,
+    "101": 1700001200
+  },
+  "logs": [
+    {
+      "blockNumber": "0x64",
+      "transactionIndex": "0x0",
+      "logIndex": "0x0",
+      "transactionHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "topics": [
+        "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+        "0x0000000000000000000000002222222222222222222222222222222222222222",
+        "0x0000000000000000000000001111111111111111111111111111111111111111"
+      ],
+      "data": "0xbb80"
+    },
+    {
+      "blockNumber": "0x65",
+      "transactionIndex": "0x0",
+      "logIndex": "0x0",
+      "transactionHash": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "topics": [
+        "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+        "0x0000000000000000000000001111111111111111111111111111111111111111",
+        "0x0000000000000000000000002222222222222222222222222222222222222222"
+      ],
+      "data": "0xbb80"
+    }
+  ]
+}

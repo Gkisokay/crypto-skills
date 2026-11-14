@@ -247,6 +247,7 @@ def check_solana(cc, mint, m):
         sigs = None
 
     creator = None
+    creator_cant = []
     if sigs:
         first = call("getTransaction", [sigs[0]["signature"], {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 1}])
         creator = fee_payer(first)
@@ -314,6 +315,10 @@ def check_solana(cc, mint, m):
             r["clusters"].append({"funder": f, "wallets": ws, "bought_share": bought_share,
                                   "held_share": held / launch_total if launch_total else 0})
         r["creator_share"] = holding(call, creator, mint) / total
+        import creator as creator_checks
+        creator_cant = creator_checks.add_solana_creator_checks(
+            cc, call, rpc.url, r, mint, creator, t0, launch_total, txs, set([curve]) | set(pools)
+        )
 
     # top holders: the 20 largest token accounts, labeled by who owns them
     largest = call("getTokenLargestAccounts", [mint])["value"]
@@ -344,6 +349,7 @@ def check_solana(cc, mint, m):
         "pump.fun that can be the launchpad's own wallet.",
         "Only the first 3 minutes after creation are read (up to 150 transactions), so a busy launch is only partly covered.",
     ]
+    r["cant_check"] += [x for x in creator_cant if x not in r["cant_check"]]
     return r
 
 

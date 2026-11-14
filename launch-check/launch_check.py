@@ -883,7 +883,8 @@ def check(addr, chain=None):
     t0_ts = rpc.block_ts(t0)
     ref = min(t0 + 1000, head)  # block time around the launch, not today's: Elysium went from ~0.32s to ~0.11s at mainnet
     bt = (rpc.block_ts(ref) - t0_ts) / (ref - t0) if ref > t0 else bt
-    creator = rpc.call("eth_getTransactionByHash", [mint["transactionHash"]])["from"].lower()
+    mint_tx = rpc.call("eth_getTransactionByHash", [mint["transactionHash"]])
+    creator = mint_tx["from"].lower()
     r["launch"] = {"block": t0, "ts": t0_ts, "creator": creator, "block_time_s": round(bt, 3)}
     r["creator"] = creator
 
@@ -971,7 +972,13 @@ def check(addr, chain=None):
             continue  # dust: wallets that got crumbs in the window, not buyers
         r["clusters"].append({"funder": f, "wallets": ws, "bought_share": bought,
                               "held_share": sum(held_all.get(w, 0) for w in ws) / total})
-    return finish(r, rpc, addr, unit, total, burned, t0, head, holder_logs, too_many=holder_logs is None)
+    import creator as creator_checks
+    creator_cant = creator_checks.add_evm_creator_checks(
+        sys.modules[__name__], rpc, r, addr, mint["transactionHash"], t0, t0_ts, head, unit, total, holder_logs
+    )
+    out = finish(r, rpc, addr, unit, total, burned, t0, head, holder_logs, too_many=holder_logs is None)
+    out["cant_check"] += [x for x in creator_cant if x not in out["cant_check"]]
+    return out
 
 
 def first_buy_block(logs, creator, token):

@@ -77,5 +77,5 @@ def main_verdict(flags, launch_checks_ran=True):
     if not flags:
         if launch_checks_ran:
             return "No red flags found by these checks; that isn't the same as safe."
-        return "No red flags found by these checks, but the launch checks did not run; this says little."
+        return "No red flags found by these checks, but the launch checks didn't run; this says little."
     return primary_flag(flags)["verdict"]

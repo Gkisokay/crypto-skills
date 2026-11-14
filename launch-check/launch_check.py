@@ -1362,9 +1362,7 @@ def fmt(r):
         if L.get("early_buyers") is not None and L.get("early_bought_share") is not None:
             lines.append(f"First {L.get('window_s', LAUNCH_WINDOW_S)}s of trading: {L['early_buyers']} wallets took {L['early_bought_share']:.1%} of supply")
     lines.append("")
-    lines.append("Red flags:" if r["flags"] else
-                 "Red flags: none found by these checks (that is not the same as safe)." if L else
-                 "Red flags: none found, but the launch checks didn't run (see the note below), so this says little.")
+    lines.append("Red flags:" if r["flags"] else "Red flags: none (see the verdict above).")
     lines += [f"- {f}" for f in r["flags"]]
     h = r["holders"]
     if h.get("top"):

@@ -27,7 +27,7 @@ class VerdictRules(unittest.TestCase):
         )
         self.assertEqual(
             verdict.main_verdict([], launch_checks_ran=False),
-            "No red flags found by these checks, but the launch checks did not run; this says little.",
+            "No red flags found by these checks, but the launch checks didn't run; this says little.",
         )
 
     def test_each_flag_gets_a_stable_code(self):

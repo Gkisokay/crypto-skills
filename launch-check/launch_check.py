@@ -21,6 +21,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
+import snipers
 
 UA = {"User-Agent": "launch-check/0.1 (+https://github.com/Gkisokay/crypto-skills)", "Content-Type": "application/json"}
 EVM_ADDRESS = re.compile(r"0x[0-9a-fA-F]{40}")
@@ -305,8 +306,10 @@ def bundle_groups(open_ts, buys, total, held=None):
     return []
 
 
-def bundle_flags(open_ts, buys, total):
-    return [x["text"] for x in bundle_groups(open_ts, buys, total)]
+def bundle_flags(open_ts, buys, total, wallet_profiles=None):
+    groups = bundle_groups(open_ts, buys, total)
+    groups = snipers.relabel_bundle_groups(groups, open_ts, buys, total, wallet_profiles or {})
+    return [x["text"] for x in groups]
 
 
 def wallet_flow_note(rpc, token, wallets, total, unit, complete, logs, replay_bal, pools):
@@ -935,6 +938,8 @@ def check(addr, chain=None):
             ts = {b: int((g or {}).get("timestamp", "0x0"), 16) for b, g in zip(blocks, got)}
         buys = {a: (recv[a], ts.get(first_block[a], open_ts)) for a in people if a in first_block}
         r["bundles"] = bundle_groups(open_ts, buys, total, peak_held)
+        profiles = snipers.evm_wallet_profiles(rpc, list(buys))
+        r["bundles"] = snipers.relabel_bundle_groups(r["bundles"], open_ts, buys, total, profiles, held=peak_held)
 
     sends, unresolved = first_funders(rpc, sorted(people), start, min(start + win, head), bt, r)
     if unresolved:

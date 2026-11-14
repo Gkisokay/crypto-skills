@@ -7,6 +7,8 @@ import collections
 import hashlib
 import os
 from concurrent.futures import ThreadPoolExecutor
+import snipers
+import solana_liquidity
 
 SYSTEM = "11111111111111111111111111111111"
 PUMP = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
@@ -246,7 +248,8 @@ def check_solana(cc, mint, m):
         r["notes"].append(f"More than {MAX_SIG_PAGES * 1000:,} transactions, so the launch wasn't reached; launch checks skipped.")
         sigs = None
 
-    creator = None
+    creator, txs, groups, bought = None, [], [], {}
+    sol_checks = {"flags": [], "notes": [], "cant_check": []}
     if sigs:
         first = call("getTransaction", [sigs[0]["signature"], {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 1}])
         creator = fee_payer(first)
@@ -273,13 +276,16 @@ def check_solana(cc, mint, m):
         r["launch"]["early_buyers"] = len(people)
         # the most early buyers held at once; per-wallet peaks can sum higher when tokens are resold in the window
         r["launch"]["early_bought_share"] = peak_held / launch_total if launch_total else 0
+        buys = {w: (bought[w], first_ts.get(w, t0)) for w in people if bought.get(w, 0) > 0}
+        profiled, capped = snipers.profile_wallets_by_take({w: bought[w] for w in people}, max_wallets=snipers.MAX_PROFILED_WALLETS)
+        profiles = snipers.solana_wallet_profiles(call, profiled, t0)
+        if capped:
+            r["notes"].append(f"Sniper/fresh profiling ran on the top {snipers.MAX_PROFILED_WALLETS} of {len(people)} early wallets by size.")
         same_slot = [w for w in people if slot_of[w] == slot0]
         if len(same_slot) >= 3:
-            share = sum(bought[w] for w in same_slot) / launch_total if launch_total else 0
-            r["extra_flags"].append(f"{len(same_slot)} wallets bought in the same block the coin was created "
-                                    f"({share:.1%} of supply), which usually means a bundled launch.")
-        buys = {w: (bought[w], first_ts.get(w, t0)) for w in people if bought.get(w, 0) > 0}
+            r["extra_flags"].append(snipers.same_block_take_flag(same_slot, t0, buys, launch_total, profiles))
         groups = cc.bundle_groups(t0, buys, launch_total, peak_held)
+        groups = snipers.relabel_bundle_groups(groups, t0, buys, launch_total, profiles, held=peak_held)
         fan = [s for s in sorted(handoffs) if handoff_flags(s, bought, handoffs, hand_times, launch_total, None)]
         holds = {}
         try:
@@ -314,6 +320,13 @@ def check_solana(cc, mint, m):
             r["clusters"].append({"funder": f, "wallets": ws, "bought_share": bought_share,
                                   "held_share": held / launch_total if launch_total else 0})
         r["creator_share"] = holding(call, creator, mint) / total
+        bundle_wallets = sorted({w for g in groups for w in g.get("wallets", [])})
+        sol_checks = solana_liquidity.apply_solana_checks(
+            call, mint, pools, creator, t0, total, bought, bundle_wallets, r.get("clusters", []), txs,
+            (m or {}).get("pair_liquidity") or {}
+        )
+        r["extra_flags"].extend(sol_checks["flags"])
+        r["notes"].extend(sol_checks["notes"])
 
     # top holders: the 20 largest token accounts, labeled by who owns them
     largest = call("getTokenLargestAccounts", [mint])["value"]
@@ -338,12 +351,11 @@ def check_solana(cc, mint, m):
         "Funding older than a wallet's first transaction, or routed through an exchange or a bridge.",
         "Wallets that already had 1,000+ transactions before buying (not traced).",
         "Who controls the creator wallet, or whether its tokens are promised to an airdrop or vesting.",
-        "Liquidity on Solana: who controls a pool's liquidity, whether it is locked or burned, and whether it was pulled. "
-        "None of that is checked on this chain yet.",
+        "Who controls Solana pool liquidity isn't checked yet; pulls are.",
         "'Creator' means the wallet that paid for the oldest transaction found for this mint; on launchpads other than "
         "pump.fun that can be the launchpad's own wallet.",
         "Only the first 3 minutes after creation are read (up to 150 transactions), so a busy launch is only partly covered.",
-    ]
+    ] + sol_checks["cant_check"]
     return r
 
 

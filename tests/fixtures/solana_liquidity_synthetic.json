@@ -1,0 +1,25 @@
+{
+  "mint": "Cb1zFVWsx8BS3NnDp8A6uQF6bJ3gQeYgKCT1dgDRq6yy",
+  "pools": [
+    {
+      "pool": "HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTLcC",
+      "amm": "meteora",
+      "quote_symbol": "USDC",
+      "quote_peak": 44700.0,
+      "quote_now": 0.16,
+      "drain_tx": "antitrump-drain-sig",
+      "drainer": "7cW45tcSDSiog8poB5LFu7CD1g4TX6JYJ8s4Ur29cb5H"
+    },
+    {
+      "pool": "RayPool1111111111111111111111111111111111111",
+      "amm": "raydium",
+      "quote_symbol": "SOL",
+      "quote_peak": 1200.0,
+      "quote_now": 1130.0,
+      "lp_holders": [
+        {"address": "8o8qgsDkA9QYxH3WQfJ8Pg63J7CZfLnu1zaf3ngQdKkn", "share": 0.76, "kind": "person"},
+        {"address": "Lock111111111111111111111111111111111111111", "share": 0.24, "kind": "program"}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "open_ts": 1700001000,
+  "total_supply": 1000000.0,
+  "duration_s": 1,
+  "wallet_count": 23,
+  "taken_share": 0.88,
+  "sniper_count": 0,
+  "fresh_count": 22,
+  "fresh_tx_count_max": 3,
+  "fresh_wallet_age_s": 120
+}

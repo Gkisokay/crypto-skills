@@ -1188,6 +1188,14 @@ def finish(r, rpc, addr, unit, total, burned, t0, head, logs=None, rug_from=None
         r.setdefault("extra_flags", []).append(m["copycat_flag"])
     if m.get("copycat_cant_check"):
         extra_cant.append(m["copycat_cant_check"])
+    contract_traps_cant = []
+    try:
+        import contract_traps
+        traps = contract_traps.check_contract_traps(rpc, addr, r.get("chain"), m, int(total * unit))
+        r.setdefault("extra_flags", []).extend(traps.get("flags") or [])
+        contract_traps_cant = traps.get("cant_check") or []
+    except RuntimeError as e:
+        contract_traps_cant = [f"Contract trap checks couldn't finish: {e}"]
     r["flags"] = flags(r)
     r["cant_check"] = [
         "Funding sent as tokens (USDC/USDT) rather than the native coin.",
@@ -1201,7 +1209,7 @@ def finish(r, rpc, addr, unit, total, burned, t0, head, logs=None, rug_from=None
         "one isn't counted among early buyers, funders or 'person' holders. 'person' means a plain wallet, which can also be a bot or an exchange.",
         "'Creator' means the wallet that sent the transaction that first minted the token. On launchpads that can be the "
         "launchpad's own wallet, not the person behind the coin.",
-    ] + extra_cant
+    ] + extra_cant + contract_traps_cant
     return r
 
 

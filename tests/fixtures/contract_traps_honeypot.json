@@ -1,0 +1,37 @@
+{
+  "name": "honeypot_proxy",
+  "chain": "base",
+  "token": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "total_supply_raw": "1000000000000000000000000",
+  "market": {
+    "pairs": [
+      "0xcccccccccccccccccccccccccccccccccccccccc"
+    ],
+    "pair_liquidity": {
+      "0xcccccccccccccccccccccccccccccccccccccccc": 24000.0
+    }
+  },
+  "code_by_address": {
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "0x60806040526004361061001f5760003560e01c80635c60da1b14610024575b600080fd5b61002c61003e565b60405161003991906100e2565b60405180910390f35b60008060009054906101000a900473ffffffffffffffffffffffffffffffffffffffff16905090565b60008135905061007d8161010f565b92915050565b6000602082840312156100995761009861010a565b5b60006100a78482850161006e565b91505092915050565b6100b9816100d0565b82525050565b60006020820190506100d460008301846100b0565b92915050565b60006100e5826100d0565b91506100f0836100d0565b9250827fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff03821115610125576101246100f5565b5b82820190509291505056",
+    "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": "0x638da5cb5b6000526340c10f1960005263f9f92be4600052638456cb59600052"
+  },
+  "storage_by_address_slot": {
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc": "0x000000000000000000000000bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "eth_call_by_to_selector": {
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|0x8da5cb5b": "0x000000000000000000000000dddddddddddddddddddddddddddddddddddddddd",
+    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|0x70a08231": "0x0",
+    "0xcccccccccccccccccccccccccccccccccccccccc|0x0dfe1681": "0x000000000000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "0xcccccccccccccccccccccccccccccccccccccccc|0xd21220a7": "0x0000000000000000000000004200000000000000000000000000000000000006",
+    "0xcccccccccccccccccccccccccccccccccccccccc|0xc45a0155": "0x0000000000000000000000008909dc15e40173ff4699343b6eb8132c65e18ec6"
+  },
+  "router_simulation": {
+    "router": "0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24",
+    "get_amounts_out": [
+      1000000000000000,
+      800000000000000
+    ],
+    "standard": "revert:execution reverted: TRANSFER_FAILED",
+    "supporting": "revert:execution reverted: TOKEN_TRANSFER_BLOCKED"
+  }
+}

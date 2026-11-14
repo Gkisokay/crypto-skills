@@ -216,7 +216,16 @@ def handoff_flags(sender, bought, handoffs, hand_times, total, holds):
 
 def check_solana(cc, mint, m):
     rpc = cc.Rpc(rpc_url(), 0, WORKERS, 1, rps=None if os.environ.get("RPC_SOLANA") else 9)  # Helius free: 10 req/s
-    call = rpc.call
+    wallet_pages = {}
+
+    def call(method, params):
+        # sniper profiling, funder tracing and the wallet-farm sample read the same 1,000-signature page per wallet
+        if method == "getSignaturesForAddress" and params[1:] == [{"limit": 1000}]:
+            if params[0] not in wallet_pages:
+                wallet_pages[params[0]] = rpc.call(method, params)
+            return wallet_pages[params[0]]
+        return rpc.call(method, params)
+
     r = {"address": mint, "chain": "solana", "market": m, "notes": [], "extra_flags": []}
     if "helius" not in rpc.url and "RPC_SOLANA" not in os.environ:
         r["notes"].append("Using Solana's public RPC, which rate-limits fast; set HELIUS_API_KEY (free at helius.dev) for reliable checks.")
@@ -295,7 +304,9 @@ def check_solana(cc, mint, m):
         except RuntimeError:
             holds = None
         if groups:
-            r["extra_flags"] += bundle_flags_with_holding(cc, t0, buys, launch_total, holds, peak_held)
+            suffix = snipers.sniper_suffix(people, profiles, t0)
+            r["extra_flags"] += [x + suffix if "first 3 minutes of trading" in x else x
+                                 for x in bundle_flags_with_holding(cc, t0, buys, launch_total, holds, peak_held)]
         for s in fan:
             r["extra_flags"] += handoff_flags(s, bought, handoffs, hand_times, launch_total, holds)
         people_by_size = sorted(people, key=lambda w: bought[w], reverse=True)
@@ -356,6 +367,8 @@ def check_solana(cc, mint, m):
         r["extra_flags"].append(m["copycat_flag"])
     r.setdefault("clusters", [])
     r["flags"] = cc.flags(r)
+    r["flag_codes"] = cc.verdict.flag_codes(r["flags"])
+    r["verdict"] = cc.verdict.main_verdict(r["flags"], launch_checks_ran=bool(r.get("launch")))
     r["cant_check"] = [
         "Funding older than a wallet's first transaction, or routed through an exchange or a bridge.",
         "Wallets that already had 1,000+ transactions before buying (not traced).",

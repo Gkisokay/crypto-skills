@@ -160,65 +160,6 @@ class SolanaLiquidity(unittest.TestCase):
         _ = sl.pool_pull_flag(call, mint, pool, launch, max_recent=10)
         self.assertLessEqual(sum(calls.values()), 25)
 
-    def test_hung_shape_creator_exit_summary(self):
-        mint, pool = "4xgqefa5WcdHWKXzqvM9MRJqWYGaHVEUnpUL4Vq5pump", "POOL"
-        creator = "H6hPTUg73GDscH4Q9NAviJrUtMwUXE6PzZat2xWDszrJ"
-        launch_ts = 1700002000
-        took = {creator: 114100000.0, "tied1": 20000000.0, "tied2": 10000000.0}
-        sigs = [f"sell-{i}" for i in range(9)]
-        tx_by_sig = {}
-        for i, sig in enumerate(sigs):
-            tx_by_sig[sig] = self.make_tx(
-                sig, launch_ts + 10 + i, creator, [creator, pool, sl.PUMP_FUN_CURVE],
-                [self.tb(creator, mint, 114100000.0 - i * 10000000.0), self.tb(pool, mint, i * 10000000.0)],
-                [self.tb(creator, mint, 104100000.0 - i * 10000000.0), self.tb(pool, mint, (i + 1) * 10000000.0)],
-                instructions=[{"programId": sl.PUMP_FUN_CURVE}],
-                pre_bal=[0, 0, 0],
-                post_bal=[int((6.2 / 9.0) * 1_000_000_000), 0, 0],
-            )
-
-        def call(method, params):
-            if method == "getSignaturesForAddress":
-                if params[0] == creator:
-                    return [{"signature": s, "blockTime": launch_ts + 10 + i, "err": None} for i, s in enumerate(sigs)]
-                return []
-            if method == "getTransaction":
-                return tx_by_sig.get(params[0])
-            raise AssertionError((method, params))
-
-        tied_txs = [
-            self.make_tx(
-                "tied-sell-1", launch_ts + 5, "tied1", ["tied1", pool, sl.PUMP_FUN_CURVE],
-                [self.tb("tied1", mint, 20000000.0), self.tb(pool, mint, 900000000.0)],
-                [self.tb("tied1", mint, 10000000.0), self.tb(pool, mint, 910000000.0)],
-                instructions=[{"programId": sl.PUMP_FUN_CURVE}],
-            ),
-            self.make_tx(
-                "tied-move-1", launch_ts + 6, "tied2", ["tied2", "wallet-x"],
-                [self.tb("tied2", mint, 10000000.0)],
-                [self.tb("wallet-x", mint, 10000000.0)],
-            ),
-        ]
-        lines = sl.insider_exit_summary(
-            call=call,
-            mint=mint,
-            total_supply=1_000_000_000.0,
-            launch_ts=launch_ts,
-            creator=creator,
-            took_by_wallet=took,
-            tied_wallets={"tied1", "tied2"},
-            pools={pool},
-            seen_txs=tied_txs,
-        )
-        joined = "\n".join(lines)
-        self.assertIn(creator, joined)
-        self.assertIn("11.41%", joined)
-        self.assertIn("9 sells", joined)
-        self.assertIn("first sell 10 s after launch", joined)
-        self.assertIn("tx sell-0", joined)
-        self.assertIn("~6.2 SOL", joined)
-        self.assertIn("2 tied wallets took 3.00%", joined)
-
 
 if __name__ == "__main__":
     unittest.main()

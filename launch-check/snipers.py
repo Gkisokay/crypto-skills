@@ -1,7 +1,9 @@
 """Classify early takers as bot snipers, fresh-wallet bundles, or unknown."""
 
 import collections
+from concurrent.futures import ThreadPoolExecutor
 
+PROFILE_WORKERS = 6
 
 SNIPER_TX_COUNT = 1000
 FRESH_MAX_TX_COUNT = 20
@@ -50,10 +52,31 @@ def early_take_flag(open_ts, buys, total, wallets, profiles, held=None):
     took = held / total if held is not None else sum((buys.get(w) or (0.0, open_ts))[0] for w in wallets) / total
     times = [float((buys.get(w) or (0.0, open_ts))[1]) for w in wallets]
     span_s = max(times) - float(open_ts) if times else 0.0
-    counts = classify_wallets(wallets, profiles, open_ts)
-    return (f"{len(wallets)} wallets took {took:.1%} in the first {_seconds_text(span_s)} s; "
-            f"{counts['bot-sniper']} look like sniper bots (1,000+ txs), "
-            f"{counts['fresh-bundle']} look like fresh wallets made for this launch.")
+    profiled = [w for w in wallets if w in (profiles or {})]
+    counts = classify_wallets(profiled, profiles, open_ts)
+    when = "in the launch block" if span_s < 1 else f"in the first {_seconds_text(span_s)} s"
+    if mostly_snipers(counts, len(profiled)):
+        return (f"Snipers: {len(wallets)} wallets took {took:.1%} {when}; {counts['bot-sniper']} of the "
+                f"{len(profiled)} profiled are sniper bots (1,000+ txs).")
+    return (f"Likely bundle: {len(wallets)} wallets took {took:.1%} {when}; of the {len(profiled)} profiled, "
+            f"{counts['bot-sniper']} look like sniper bots (1,000+ txs) and "
+            f"{counts['fresh-bundle']} are fresh wallets made for this launch.")
+
+
+def mostly_snipers(counts, profiled):
+    return profiled > 0 and counts["bot-sniper"] * 2 > profiled
+
+
+def sniper_suffix(wallets, profiles, launch_ts):
+    """Clause for the 3-minute early-buyers line, so sniper-heavy launches don't read as a bundle."""
+    profiled = [w for w in wallets if w in (profiles or {})]
+    counts = classify_wallets(profiled, profiles, launch_ts)
+    if not profiled:
+        return ""
+    if mostly_snipers(counts, len(profiled)):
+        return f" They are mostly sniper bots: {counts['bot-sniper']} of the {len(profiled)} profiled have 1,000+ txs."
+    return (f" Of the {len(profiled)} profiled, {counts['bot-sniper']} are sniper bots (1,000+ txs) and "
+            f"{counts['fresh-bundle']} are fresh wallets made for this launch.")
 
 
 def same_block_take_flag(wallets, open_ts, buys, total, profiles):
@@ -99,9 +122,11 @@ def evm_wallet_profiles(rpc, wallets):
 def solana_wallet_profiles(call, wallets, launch_ts, funded_wallets=None):
     """Profiles for Solana early takers using signature pages as tx count."""
     funded_wallets = funded_wallets or set()
+    wallets = sorted(set(wallets))
+    with ThreadPoolExecutor(PROFILE_WORKERS) as ex:
+        pages = list(ex.map(lambda w: call("getSignaturesForAddress", [w, {"limit": 1000}]) or [], wallets))
     out = {}
-    for w in sorted(set(wallets)):
-        page = call("getSignaturesForAddress", [w, {"limit": 1000}]) or []
+    for w, page in zip(wallets, pages):
         first_seen = page[-1].get("blockTime") if page and len(page) < 1000 else None
         out[w] = {"tx_count": len(page), "first_seen_ts": first_seen, "funded_for_launch": w in funded_wallets}
     return out

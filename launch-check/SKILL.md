@@ -25,6 +25,7 @@ Use the full address (copycat tokens share names and tickers):
 python3 <this skill's folder>/launch_check.py <address>            # chain auto-detected from DexScreener
 python3 <this skill's folder>/launch_check.py <address> --chain base
 python3 <this skill's folder>/launch_check.py <address> --json      # full data, for follow-up questions
+python3 -m unittest discover -s tests -q                            # from repo root, runs all tests
 ```
 
 It takes a few seconds on Base and from one to several minutes on other chains or busy tokens. Tell the user it's

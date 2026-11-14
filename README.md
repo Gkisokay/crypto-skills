@@ -8,6 +8,14 @@ or the caller says. Pool addresses, prices and liquidity figures come from DexSc
 
 New skills go out by email first: **[sign up on Substack](https://substack.com/@gkisokay)** (free).
 
+## Skills
+
+Each skill folder is self-contained (code + docs), so new skills can be added beside `launch-check/`.
+
+| Skill folder | What it does | Run from repo root | Tests |
+|---|---|---|---|
+| `launch-check/` | Checks a fresh token's launch: creator, early buyers/funders, bundle patterns, liquidity control/pulls (EVM), FDV mismatch, holders | `python3 launch-check/launch_check.py <address>` | `python3 -m unittest discover -s tests -q` |
+
 ## launch-check
 
 Paste a token address, get back:
@@ -23,6 +31,19 @@ Paste a token address, get back:
 - **Liquidity control and removals (EVM chains, Uniswap v2/v3/v4-style pools):** flags when one plain wallet
   (including the creator) controls most removable liquidity, and reports which wallet removed liquidity and how soon
   after launch; v4 amounts are reported as a share of the pool's liquidity units.
+- **A one-line verdict** on line 2: the main risk in plain words, picked from the red flags.
+- **Snipers vs bundles:** early buyers with 1,000+ past transactions are called sniper bots; fresh wallets that buy
+  together are a likely bundle.
+- **Wallet farms:** 20+ plain wallets holding near-equal slices of the supply, with a one-hop funder sample.
+- **Creator history and exit:** how many other coins the creator wallet launched, how they're doing now, and when the
+  creator sold or moved its tokens after launch.
+- **Contract traps (EVM):** a simulated sell (honeypot, sell tax), owner-only mint, blacklist and pause functions, and
+  upgradeable proxies. **Token traps (Solana):** mint and freeze authority, and Token-2022 extensions that can block
+  transfers or take fees.
+- **Fake market cap and fake volume:** FDV far above what the liquidity supports, and volume from a few wallets
+  trading back and forth.
+- **Copycat names:** same name or ticker as a bigger, older coin.
+- **Solana liquidity pulls** from PumpSwap, Meteora and Raydium CPMM pools.
 
 launch-check is built for coins in their first 7 days. Older coins still get supply/FDV/holder summaries, but launch,
 bundle and liquidity checks are skipped.
@@ -31,10 +52,12 @@ It will never tell you a coin is "safe". The best it can say is that these check
 
 ### What it doesn't check (yet)
 
-- Contract traps: honeypots (you can buy but can't sell), sell taxes, mint or blacklist functions, upgradeable contracts.
+- Contract traps the sell simulation can't reach: it needs a Uniswap v2-style pool against the wrapped native coin, and
+  owner functions are found by selector, so a renamed function is missed.
 - Aerodrome and other non-Uniswap pool designs, and any pool DexScreener doesn't list.
-- **Liquidity on Solana.** The Solana check covers the creator, first buyers, funders, holders and mint/freeze
-  authority. It does not check who controls a pool's liquidity or whether it was pulled.
+- **Who controls Solana pool liquidity.** Pulls from PumpSwap, Meteora and Raydium CPMM pools are checked; who could
+  pull them isn't.
+- Fake volume that already stopped: the check reads the latest ~140 transactions only.
 - Who is behind a wallet. A "person" is any plain wallet, which can be a bot or an exchange; smart-contract wallets
   (Safe, Coinbase Smart Wallet) are labeled "contract".
 
@@ -69,6 +92,7 @@ There's nothing else to install.
 
 ```
 git clone https://github.com/Gkisokay/crypto-skills
+cd crypto-skills
 ```
 
 **Claude Code:** copy the skill into your skills folder, then just ask Claude to check a coin.
@@ -85,8 +109,9 @@ mkdir -p ~/.claude/skills && cp -R crypto-skills/launch-check ~/.claude/skills/
 **No AI, just the terminal:**
 
 ```
-python3 crypto-skills/launch-check/launch_check.py <address>
-python3 crypto-skills/launch-check/launch_check.py <address> --chain base
+python3 launch-check/launch_check.py <address>
+python3 launch-check/launch_check.py <address> --chain base
+python3 -m unittest discover -s tests -q
 ```
 
 A check takes seconds on Base and one to three minutes on Robinhood Chain. On an

@@ -1,0 +1,67 @@
+[
+  {
+    "name": "liquidity_pulled_beats_bundle",
+    "flags": [
+      "Likely bundle: 6 wallets bought 64.0% of supply within 2.3 s of trading opening, in near-identical sizes (~10.7% each).",
+      "Liquidity pulled: The creator 0x1111111111111111111111111111111111111111 removed 42.0 WETH from pool 0x2222222222222222222222222222222222222222, 13 min after the first pool opened; the pool has 0.01 WETH left. Last removal: tx 0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ],
+    "expected_code": "LP_PULLED",
+    "verdict_contains": "liquidity was pulled"
+  },
+  {
+    "name": "sell_revert_beats_bundle",
+    "flags": [
+      "Likely bundle: 5 wallets took 38.0% in the launch block; of the 5 profiled, 0 look like sniper bots (1,000+ txs) and 5 are fresh wallets made for this launch.",
+      "Selling reverts in simulation: execution reverted: TRANSFER_FAILED (simulated sell via router 0x4752ba5dbc23f44d87826276bf6fd6b1c372ad24, pool 0x2222222222222222222222222222222222222222)."
+    ],
+    "expected_code": "HONEYPOT_OR_SELL_BLOCKED",
+    "verdict_contains": "selling can fail or be blocked"
+  },
+  {
+    "name": "bundle_beats_tax_and_creator",
+    "flags": [
+      "Tax getter sellTax() reports 28.0% (eth_call).",
+      "Creator wallet holds 19.0% of supply.",
+      "Likely bundle: 8 wallets took 42.0% in the launch block; of the 8 profiled, 0 look like sniper bots (1,000+ txs) and 7 are fresh wallets made for this launch."
+    ],
+    "expected_code": "BUNDLE",
+    "verdict_contains": "a group of wallets took a large share at launch"
+  },
+  {
+    "name": "affair_inu_live_nov14_reads_as_snipers",
+    "flags": [
+      "59 wallets took 42.2% of supply in the first 3 minutes of trading; they hold 0.4% now. They are mostly sniper bots: 50 of the 59 profiled have 1,000+ txs.",
+      "The creator wallet DqHChnrHoFYGagN6oZgqbSd4wKr9aSbBA25gTfY1fffw sold 4.67% back to the curve/pool 5DjJX6pUyYc1HDFoZ8XvVnDLyguKvq1ZMdJBpNJMhrg7 3 s later (tx 3CLg).",
+      "Same ticker as Artificial Inu on Robinhood Chain (0x2E8c31162b855A2ffa90F6F8634643Ad6F111e18, $28,115,438 FDV, 121 days older)."
+    ],
+    "expected_code": "SNIPER_CLUSTER",
+    "verdict_contains": "sniper bots took a large share"
+  },
+  {
+    "name": "gta_live_nov14_reads_as_bundle",
+    "flags": [
+      "Likely bundle: 23 wallets took 86.9% in the launch block; of the 23 profiled, 0 look like sniper bots (1,000+ txs) and 0 are fresh wallets made for this launch.",
+      "115 wallets took 86.9% of supply in the first 3 minutes of trading; they hold 0.0% now. Of the 60 profiled, 3 are sniper bots (1,000+ txs) and 0 are fresh wallets made for this launch."
+    ],
+    "expected_code": "BUNDLE",
+    "verdict_contains": "a group of wallets"
+  },
+  {
+    "name": "uodf_live_nov14_reads_as_farm",
+    "flags": [
+      "The creator wallet 8MEBm6wKJAqDEa1boTrrCpMt2HckmkX9wS9YCZok8ScJ moved 100.00% to HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTLcC 1 s later (tx rYwm).",
+      "FDV is $9,791,473 while listed liquidity is $18,793 (521x); that gap is far larger than this liquidity can support.",
+      "100 wallets hold 99.9% in near-equal slices of ~1.0% each; most have <=4 txs (made for this); one-hop funders were distinct across the sampled 20 wallets."
+    ],
+    "expected_code": "WALLET_FARM",
+    "verdict_contains": "wallet farm"
+  },
+  {
+    "name": "unknown_flag_falls_back_to_first",
+    "flags": [
+      "Unmapped anomaly: wallet 0x3333333333333333333333333333333333333333 touched 4 launch txs."
+    ],
+    "expected_code": "FLAG_OTHER",
+    "verdict_contains": "Unmapped anomaly"
+  }
+]

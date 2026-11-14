@@ -35,8 +35,8 @@ class Snipers(unittest.TestCase):
             profiles[w] = {"tx_count": cfg["sniper_tx_count"] if i < cfg["sniper_count"] else cfg["other_tx_count"]}
         text = snipers.early_take_flag(cfg["open_ts"], buys, cfg["total_supply"], [w for w, _, _ in wallets], profiles)
         self.assertIn("59 wallets took 42.2% in the first 172 s", text)
-        self.assertIn("49 look like sniper bots (1,000+ txs)", text)
-        self.assertIn("0 look like fresh wallets made for this launch", text)
+        self.assertTrue(text.startswith("Snipers: "), text)
+        self.assertIn("49 of the 59 profiled are sniper bots (1,000+ txs)", text)
 
     def test_gta_shape_reads_as_fresh_wallet_bundle(self):
         cfg = self.load("snipers_gta.json")
@@ -51,7 +51,8 @@ class Snipers(unittest.TestCase):
         text = snipers.early_take_flag(cfg["open_ts"], buys, cfg["total_supply"], [w for w, _, _ in wallets], profiles)
         self.assertIn("23 wallets took 88.0% in the first 1 s", text)
         self.assertIn("0 look like sniper bots (1,000+ txs)", text)
-        self.assertIn("22 look like fresh wallets made for this launch", text)
+        self.assertTrue(text.startswith("Likely bundle: "), text)
+        self.assertIn("22 are fresh wallets made for this launch", text)
 
     def test_relabel_bundle_groups_keeps_legacy_when_profiles_missing(self):
         buys = {"w1": (6.0, 100.0), "w2": (6.0, 100.4), "w3": (6.0, 100.8), "w4": (6.0, 101.2)}
@@ -66,23 +67,24 @@ class Snipers(unittest.TestCase):
         profiles = {w: {"tx_count": 1200 if i < 8 else 20} for i, w in enumerate(buys)}
         out = cc.bundle_flags(100.0, buys, 100.0, wallet_profiles=profiles)
         self.assertTrue(out and "wallets took 35.0%" in out[0], out)
-        self.assertIn("8 look like sniper bots (1,000+ txs)", out[0])
+        self.assertTrue(out[0].startswith("Snipers: "), out[0])
+        self.assertIn("8 of the 10 profiled are sniper bots (1,000+ txs)", out[0])
 
     def test_same_block_flag_is_reworded_to_sniper_shape(self):
         wallets = [f"w{i}" for i in range(5)]
         buys = {w: (20.0, 100.0) for w in wallets}
         profiles = {w: {"tx_count": 1400} for w in wallets}
         text = snipers.same_block_take_flag(wallets, 100.0, buys, 100.0, profiles)
-        self.assertIn("5 wallets took 100.0% in the first 0 s", text)
-        self.assertIn("5 look like sniper bots (1,000+ txs)", text)
+        self.assertIn("Snipers: 5 wallets took 100.0% in the launch block", text)
+        self.assertIn("5 of the 5 profiled are sniper bots (1,000+ txs)", text)
 
     def test_same_block_flag_is_reworded_to_fresh_shape(self):
         wallets = [f"w{i}" for i in range(4)]
         buys = {w: (10.0, 100.0) for w in wallets}
         profiles = {w: {"tx_count": 2, "first_seen_ts": 80.0, "funded_for_launch": True} for w in wallets}
         text = snipers.same_block_take_flag(wallets, 100.0, buys, 100.0, profiles)
-        self.assertIn("4 wallets took 40.0% in the first 0 s", text)
-        self.assertIn("4 look like fresh wallets made for this launch", text)
+        self.assertIn("Likely bundle: 4 wallets took 40.0% in the launch block", text)
+        self.assertIn("4 are fresh wallets made for this launch", text)
 
     def test_wallet_profiling_is_capped_to_top_60(self):
         took_by_wallet = {f"w{i:03d}": float(i) for i in range(65)}

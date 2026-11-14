@@ -239,115 +239,9 @@ def format_liquidity_pull(pool):
             f"by {pool.get('drainer') or 'unknown'}.")
 
 
-def _wallet_token_delta(tx, wallet, mint):
-    pre, post = _token_balances(tx, wallet, mint)
-    return post - pre
-
-
-def _wallet_sol_gain(tx, wallet):
-    keys = (((tx or {}).get("transaction") or {}).get("message") or {}).get("accountKeys") or []
-    idx = None
-    for i, key in enumerate(keys):
-        pub = key.get("pubkey") if isinstance(key, dict) else key
-        if pub == wallet:
-            idx = i
-            break
-    if idx is None:
-        return 0.0
-    meta = (tx or {}).get("meta") or {}
-    pre = (meta.get("preBalances") or [])
-    post = (meta.get("postBalances") or [])
-    if idx >= len(pre) or idx >= len(post):
-        return 0.0
-    return max((post[idx] - pre[idx]) / 1_000_000_000.0, 0.0)
-
-
-def _wallet_outflow_kind(tx, wallet, mint, pools):
-    d = _wallet_token_delta(tx, wallet, mint)
-    if d >= 0:
-        return 0.0, ""
-    out = -d
-    pool_hits = _owner_deltas(tx, mint)
-    sold = any(pool_hits.get(p, 0.0) > 0 for p in pools)
-    return out, "sold" if sold else "moved"
-
-
-def insider_exit_summary(call, mint, total_supply, launch_ts, creator, took_by_wallet, tied_wallets, pools, seen_txs):
-    lines = []
-    pool_targets = set(pools or [])
-    pool_targets.add(PUMP_FUN_CURVE)
-    if creator:
-        sigs = call("getSignaturesForAddress", [creator, {"limit": 100}]) or []
-        txs = []
-        for s in sigs:
-            if s.get("err") or (s.get("blockTime") or 0) < launch_ts:
-                continue
-            tx = call("getTransaction", [s["signature"], {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 1}])
-            if tx:
-                txs.append(tx)
-        txs.sort(key=_time)
-        sold = moved = 0.0
-        sells = moves = 0
-        first_sell_ts = None
-        first_sell_sig = ""
-        sol = 0.0
-        for tx in txs:
-            amt, kind = _wallet_outflow_kind(tx, creator, mint, pool_targets)
-            if amt <= 0:
-                continue
-            if kind == "sold":
-                sold += amt
-                sells += 1
-                sol += _wallet_sol_gain(tx, creator)
-                if first_sell_ts is None:
-                    first_sell_ts = _time(tx)
-                    first_sell_sig = _sig(tx)
-            else:
-                moved += amt
-                moves += 1
-        took = float((took_by_wallet or {}).get(creator) or 0.0)
-        if sells > 0:
-            first_gap = int(max((first_sell_ts or launch_ts) - launch_ts, 0))
-            lines.append(f"Creator {creator} took {took / total_supply:.2%}, sold {sold / total_supply:.2%} in {sells} sells "
-                         f"for ~{sol:.1f} SOL, first sell {first_gap} s after launch, tx {first_sell_sig}.")
-        elif moves > 0:
-            lines.append(f"Creator {creator} took {took / total_supply:.2%}, moved {moved / total_supply:.2%} in {moves} transfers after launch.")
-    tied = sorted(set(tied_wallets or []) - ({creator} if creator else set()))
-    if tied:
-        sold = moved = 0.0
-        for tx in seen_txs or []:
-            if _time(tx) < launch_ts:
-                continue
-            for w in tied:
-                amt, kind = _wallet_outflow_kind(tx, w, mint, pool_targets)
-                if kind == "sold":
-                    sold += amt
-                elif kind == "moved":
-                    moved += amt
-        took = sum(float((took_by_wallet or {}).get(w) or 0.0) for w in tied)
-        if sold > 0:
-            lines.append(f"{len(tied)} tied wallets took {took / total_supply:.2%}, have sold {sold / total_supply:.2%} so far.")
-        elif moved > 0:
-            lines.append(f"{len(tied)} tied wallets took {took / total_supply:.2%}, have moved {moved / total_supply:.2%} so far.")
-        else:
-            lines.append(f"{len(tied)} tied wallets took {took / total_supply:.2%}, have sold 0.00% so far.")
-    return lines
-
-
-def launch_insiders(creator, bundle_wallets, clusters):
-    """Creator plus first-minutes wallets tied to it via creator-funded cluster or launch bundle."""
-    tied = set(bundle_wallets or [])
-    for c in clusters or []:
-        if c.get("funder") == creator:
-            tied.update(c.get("wallets") or [])
-    if creator:
-        tied.add(creator)
-    return tied
-
-
 def apply_solana_checks(call, mint, pools, creator, launch_ts, total_supply, took_by_wallet, bundle_wallets, clusters,
                         launch_txs, pair_liquidity=None):
-    """Return extra Solana pull + insider findings (LP control intentionally not checked yet)."""
+    """Return Solana pull findings (LP control intentionally not checked yet)."""
     flags, notes, cant = [], [], []
     ranked = sorted(set(pools or []), key=lambda p: float((pair_liquidity or {}).get(p, 0.0)), reverse=True)[:3]
     for pool in ranked:
@@ -358,11 +252,4 @@ def apply_solana_checks(call, mint, pools, creator, launch_ts, total_supply, too
             notes.append(f"Couldn't check pull history for pool {pool}: recent pool transactions couldn't be read from this RPC.")
         if pulled:
             flags.append(pulled["text"])
-    insiders = launch_insiders(creator, bundle_wallets, clusters)
-    try:
-        # creator.py reports the creator's own exit; this adds only the tied wallets' aggregate
-        flags.extend(insider_exit_summary(call, mint, total_supply, launch_ts, None, took_by_wallet,
-                                          insiders - ({creator} if creator else set()), set(pools or []), launch_txs))
-    except RuntimeError:
-        notes.append("Couldn't check creator post-launch exits: creator transaction history couldn't be read from this RPC.")
     return {"flags": flags, "notes": notes, "cant_check": cant}

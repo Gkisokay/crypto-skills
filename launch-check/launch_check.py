@@ -11,6 +11,7 @@ Stdlib only. Reports what it found and what it could not check; it never says a 
 import collections
 import http.client
 import json
+import math
 import os
 import random
 import re
@@ -24,6 +25,7 @@ from concurrent.futures import ThreadPoolExecutor
 import copycat
 import holder_patterns
 import snipers
+import verdict
 
 UA = {"User-Agent": "launch-check/0.1 (+https://github.com/Gkisokay/crypto-skills)", "Content-Type": "application/json"}
 EVM_ADDRESS = re.compile(r"0x[0-9a-fA-F]{40}")
@@ -68,6 +70,7 @@ MIN_POOL_USD = 1000
 BUNDLE_WINDOW_S = 5
 FUNDING_BUDGET_S = 60
 MONO = time.monotonic
+MAX_HUMAN_SPAN_S = 30 * 86400
 
 
 def http_json(url, body=None, tries=7, deadline=None):
@@ -413,9 +416,8 @@ def removal_time(rpc, last, first_add, start_ts):
         gap, since = ts - rpc.block_ts(first_add), "after liquidity was first added to that pool"
     else:
         gap, since = ts - start_ts, "after the first pool opened"
-    if gap < 0:  # the removal predates every opening time we have: give the time itself rather than a negative span
-        return time.strftime("at %Y-%m-%d %H:%M:%SZ", time.gmtime(ts))
-    return f"{human_span(gap)} {since}"
+    span = human_span(gap)
+    return f"{span} {since}" if span != "time unknown" else f"time unknown {since}"
 
 
 def liquidity_pulls(rpc, pools, token, creator, frm, to, start_ts):
@@ -1312,11 +1314,13 @@ def finish(r, rpc, addr, unit, total, burned, t0, head, logs=None, rug_from=None
     except RuntimeError as e:
         contract_traps_cant = [f"Contract trap checks couldn't finish: {e}"]
     r["flags"] = flags(r)
+    r["flag_codes"] = verdict.flag_codes(r["flags"])
+    r["verdict"] = verdict.main_verdict(r["flags"], launch_checks_ran=bool(r.get("launch")))
     r["cant_check"] = [
         "Funding sent as tokens (USDC/USDT) rather than the native coin.",
         "Funding through a bridge or an exchange withdrawal (the funder then looks like a busy wallet and is skipped).",
         "Who controls the creator wallet, or whether its tokens are promised to an airdrop or vesting.",
-        "Contract risks (mint, blacklist, tax, upgradeable proxy); check the contract separately.",
+        "Contract functions found only by name (a renamed mint or blacklist function is missed); sell simulation needs a v2-style pool.",
         "LP control and liquidity pulls cover Uniswap v2/v3/v4-style pools; Aerodrome and other non-Uniswap designs are not covered yet.",
         "Pools DexScreener doesn't list. Pool addresses, pool age and liquidity figures come from DexScreener, not from the chain.",
         "On v3/v4 pools, shares are of liquidity units; positions in different price ranges aren't directly comparable.",
@@ -1329,6 +1333,12 @@ def finish(r, rpc, addr, unit, total, burned, t0, head, logs=None, rug_from=None
 
 
 def human_span(seconds):
+    try:
+        seconds = float(seconds)
+    except (TypeError, ValueError):
+        return "time unknown"
+    if not math.isfinite(seconds) or seconds < 0 or seconds > MAX_HUMAN_SPAN_S:
+        return "time unknown"
     return f"{seconds:.0f} s" if seconds < 120 else f"{seconds / 60:.0f} min" if seconds < 7200 else f"{seconds / 3600:.1f}h"
 
 
@@ -1336,6 +1346,7 @@ def fmt(r):
     m = r.get("market") or {}
     s = r["supply"]
     lines = [f"Launch check: {r['symbol']} on {r['chain']} · {r['address']}"]
+    lines.append(r.get("verdict") or verdict.main_verdict(r.get("flags", []), launch_checks_ran=bool(r.get("launch"))))
     if m:
         liq = "unknown (DexScreener gives no figure)" if m.get("liquidity") is None else f"${m['liquidity']:,.0f}"
         lines.append(f"Price ${m['price']:.8g} · liquidity {liq} · DexScreener FDV ${m['dex_fdv'] or 0:,.0f}"
@@ -1348,7 +1359,8 @@ def fmt(r):
         if L.get("first_buy_ts"):
             lines.append(f"Trading opened {time.strftime('%Y-%m-%d %H:%M:%SZ', time.gmtime(L['first_buy_ts']))} "
                          f"(block {L['first_buy_block']}), {human_span(L['first_buy_ts'] - L['ts'])} after the mint")
-        lines.append(f"First {L.get('window_s', LAUNCH_WINDOW_S)}s of trading: {L['early_buyers']} wallets took {L['early_bought_share']:.1%} of supply")
+        if L.get("early_buyers") is not None and L.get("early_bought_share") is not None:
+            lines.append(f"First {L.get('window_s', LAUNCH_WINDOW_S)}s of trading: {L['early_buyers']} wallets took {L['early_bought_share']:.1%} of supply")
     lines.append("")
     lines.append("Red flags:" if r["flags"] else
                  "Red flags: none found by these checks (that is not the same as safe)." if L else

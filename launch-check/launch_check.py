@@ -918,7 +918,8 @@ def check(addr, chain=None, any_age=False):
             age_d = int(age_s / 86400)
             if not any_age:
                 r["notes"].append(f"This coin is {age_d} days old. launch-check is built for new launches (first {MAX_AGE_DAYS} days), "
-                                  "so the launch, bundle and liquidity checks were skipped.")
+                                  "so the launch, bundle and liquidity checks were skipped. Run it again with --any-age for the "
+                                  "creator's share, funder clusters and labeled holders (takes minutes).")
                 return finish(r, rpc, addr, unit, total, burned, None, head)
             old = True
             r["notes"].append(f"This coin is {age_d} days old. launch-check is built for new launches (first {MAX_AGE_DAYS} days); "

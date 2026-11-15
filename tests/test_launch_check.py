@@ -384,6 +384,10 @@ class AnyAge(unittest.TestCase):
         self.assertNotIn("top", r["holders"])
         self.assertTrue(any("16 days old" in n and "first 7 days" in n for n in r["notes"]), r["notes"])
 
+    def test_default_note_points_to_any_age(self):
+        r = cc.check(self.TOKEN, "base")
+        self.assertTrue(any("--any-age" in n for n in r["notes"]), r["notes"])
+
     def test_any_age_finds_the_creator_and_their_share(self):
         r = cc.check(self.TOKEN, "base", any_age=True)
         self.assertEqual(r["creator"], self.MAKER)

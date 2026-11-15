@@ -546,6 +546,11 @@ def add_evm_creator_checks(cc, rpc, r, token, mint_tx_hash, t0, t0_ts, head, uni
         if "trace_filter" in str(e) and ("-32601" in str(e) or "not available" in str(e) or "does not exist" in str(e)):
             cant.append("Creator history on this EVM chain wasn't checked because this RPC has no trace API; "
                         "set RPC_<CHAIN> to a tracing endpoint.")
+        elif "personal token" in str(e).lower():
+            cant.append("Creator history wasn't checked: it needs archive data; "
+                        "set PUBLICNODE_TOKEN (free at allnodes.com/publicnode).")
+        elif "block range too large" in str(e).lower():
+            cant.append("Creator history wasn't read: the provider limits this lookup to 100 blocks at a time.")
         else:
             cant.append(f"Creator history check couldn't finish: {type(e).__name__}: {str(e)[:120]}")
     if launches:

@@ -1314,7 +1314,7 @@ def finish(r, rpc, addr, unit, total, burned, t0, head, logs=None, rug_from=None
         r.setdefault("extra_flags", []).extend(traps.get("flags") or [])
         contract_traps_cant = traps.get("cant_check") or []
     except RuntimeError as e:
-        contract_traps_cant = [f"Contract trap checks couldn't finish: {e}"]
+        contract_traps_cant = [f"Contract trap checks couldn't finish: this RPC refused one of the calls ({type(e).__name__})."]
     r["flags"] = flags(r)
     r["flag_codes"] = verdict.flag_codes(r["flags"])
     r["verdict"] = verdict.main_verdict(r["flags"], launch_checks_ran=bool(r.get("launch")))

@@ -325,7 +325,7 @@ def _probe_layout(rpc, token, router):
         for order in ("solidity", "vyper"):
             loc = _slot_map(PROBE, slot, order)
             ov = _deep_copy_override(base)
-            ov[token]["stateDiff"][loc] = hex(amount)
+            ov[token]["stateDiff"][loc] = "0x" + _u256_word(amount)
             got = _decode_u256(_eth_call(rpc, {"to": token, "data": selector("balanceOf(address)") + _word_addr(PROBE)}, ov))
             if got == amount:
                 bal_layout = (order, slot)
@@ -340,8 +340,8 @@ def _probe_layout(rpc, token, router):
     for slot in range(11):
         for order in ("solidity", "vyper"):
             ov = _deep_copy_override(base)
-            ov[token]["stateDiff"][bal_loc] = hex(amount)
-            ov[token]["stateDiff"][_slot_nested(PROBE, router, slot, order)] = hex(amount)
+            ov[token]["stateDiff"][bal_loc] = "0x" + _u256_word(amount)
+            ov[token]["stateDiff"][_slot_nested(PROBE, router, slot, order)] = "0x" + _u256_word(amount)
             got = _decode_u256(_eth_call(
                 rpc,
                 {"to": token, "data": selector("allowance(address,address)") + _word_addr(PROBE) + _word_addr(router)},
@@ -376,8 +376,8 @@ def _simulate_sell(rpc, token, chain, market, total_supply_raw):
     ov = {
         PROBE: {"balance": hex(10**20)},
         token: {"stateDiff": {
-            _slot_map(PROBE, bal_layout[1], bal_layout[0]): hex(amount_in),
-            _slot_nested(PROBE, router, allow_layout[1], allow_layout[0]): hex(amount_in),
+            _slot_map(PROBE, bal_layout[1], bal_layout[0]): "0x" + _u256_word(amount_in),
+            _slot_nested(PROBE, router, allow_layout[1], allow_layout[0]): "0x" + _u256_word(amount_in),
         }},
     }
 

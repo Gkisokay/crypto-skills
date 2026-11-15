@@ -70,7 +70,7 @@ Check those separately before you buy. Every report ends with a "Couldn't check"
 
 | Chain | Works with no key | With a free key |
 |---|---|---|
-| Base | ✅ new launches, in seconds | ✅ older coins too (PublicNode token) |
+| Base | ✅ new launches, seconds to about 2 minutes | ✅ older coins too (PublicNode token) |
 | BNB Chain | ⚠️ launch, holder and liquidity checks; tracing who funded the first buyers often runs out of time | ✅ PublicNode token |
 | Robinhood Chain | ⚠️ same as BNB Chain; 1 to 3 minutes | — |
 | Ethereum | ❌ the report says the launch checks didn't run | ✅ PublicNode token |
@@ -133,7 +133,7 @@ python3 launch-check/launch_check.py <address> --chain base
 python3 -m unittest discover -s tests -q
 ```
 
-A check takes seconds on Base and one to three minutes on Robinhood Chain. On an
+A check takes from seconds to about two minutes on Base and one to three minutes on Robinhood Chain. On an
 older coin, the report says the launch checks didn't run because launch-check is for the first 7 days.
 
 Always paste the full address. Copycat tokens share names and tickers.
@@ -142,7 +142,8 @@ Always paste the full address. Copycat tokens share names and tickers.
 
 The skills have no server, no account and no analytics. Nothing is sent to the author. launch-check reads no files and
 writes none (apart from Python's own `__pycache__` folder). cluster-map caches the answers it gets in
-`~/.cache/cluster-map/` and writes nothing else unless you pass `--out`. Both read keys only from environment variables.
+`~/.cache/cluster-map/` (it can grow to hundreds of MB and is safe to delete) and writes nothing else unless you pass
+`--out`. Both read keys only from environment variables.
 
 It does make web requests, and each service below sees your IP address, like any website you visit:
 
@@ -153,7 +154,8 @@ It does make web requests, and each service below sees your IP address, like any
 | The chain's RPC endpoint: PublicNode (Ethereum, Base, BNB, HyperEVM), `rpc.mainnet.chain.robinhood.com`, `rpc.elysium.kinetiq.xyz`, `api.mainnet-beta.solana.com`, or Helius / whatever you set in `RPC_<CHAIN>` | the token address, its pool addresses, and the addresses of the creator, the first buyers, their funders and the top holders; your `PUBLICNODE_TOKEN` or `HELIUS_API_KEY` if you set one (to that provider only) |
 
 cluster-map sends the token address and the holder wallets it looks up to the chain's provider: PublicNode (Base),
-Blockscout (`api.blockscout.com`, Robinhood Chain) or Helius (Solana), with your key for that provider.
+Blockscout (`api.blockscout.com`) and `rpc.mainnet.chain.robinhood.com` (Robinhood Chain) or Helius (Solana), with
+your key for that provider.
 
 Your own wallet address is not sent unless it is one of the wallets above. These services can see that your IP
 looked up a coin. If you run launch-check through an AI agent, the address and the report also go to that AI provider

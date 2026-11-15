@@ -28,7 +28,8 @@ python3 <this skill's folder>/launch_check.py <address> --json      # full data,
 python3 -m unittest discover -s tests -q                            # from repo root, runs all tests
 ```
 
-It takes a few seconds on Base and from one to several minutes on other chains or busy tokens. Tell the user it's
+It takes from a few seconds to about two minutes on Base and from one to several minutes on other chains or busy
+tokens. Tell the user it's
 running. It sends the token address and the wallet addresses it looks up to DexScreener, GeckoTerminal and the
 chain's RPC endpoint; say so if the user asks what is shared.
 
@@ -105,7 +106,7 @@ What works with no keys, what needs a free key, and what we've actually tested:
 
 | Chain | No key (public RPC) | With a free key |
 |---|---|---|
-| Base | ✅ new launches, tested Nov 11–12 2026 on coins minutes to hours old (publicnode), 3–10 s. Older coins: the launch checks are skipped with a note (publicnode refuses old state without a token) | PublicNode token: older launches and more funders |
+| Base | ✅ new launches, tested Nov 11–12 2026 on coins minutes to hours old (publicnode), 3–10 s; 40–110 s on a busier one Nov 15. Older coins: the launch checks are skipped with a note (publicnode refuses old state without a token) | PublicNode token: older launches and more funders |
 | BNB Chain | ⚠️ launch, holder and liquidity checks work (publicnode, ~1 min); tracing who funded the first buyers often runs out of its 60 s budget, and the report says so | PublicNode token: older launches and more funders |
 | Robinhood Chain | ⚠️ same as BNB Chain (official RPC), 1–3 min on new launches | your own RPC is faster (not tested) |
 | Elysium | ⚠️ Kinetiq's official public RPC works but is slow (1–2 min) and funder tracing runs out of time | Conduit API key (free tier at app.conduit.xyz, not tested yet) |

@@ -96,8 +96,9 @@ Paste a token address and get the answer as plain text in your chat:
 - **Each cluster:** how many wallets, what they hold now and bought at launch, and one sentence on why they're linked
   (funded by the same wallet, funded or bought within seconds of each other, or sent coins straight to each other).
 - **Where the money went after launch:** ETH or SOL followed for up to 3 hops, for example "17.74 ETH went back to
-  0x9bf4…2c11, the wallet that funded them."
-- **Every linked wallet in full**, and a "How this was read" list of exactly what was and wasn't read.
+  0x9bf4ef3459e2d376518ebb36bb992c0b38fc2c11, the wallet that funded them."
+- **Linked wallets in full**, up to 20 per cluster in the chat (all of them with `--out`), and a "How this was read"
+  list of exactly what was and wasn't read.
 
 It takes from about a minute to half an hour, depending on the chain and how many holders have long histories. Each
 chain needs one free key (Base: PublicNode, Robinhood Chain: Blockscout, Solana: Helius); see [SETUP.md](SETUP.md).

@@ -53,7 +53,7 @@ is not a result: do not say or imply anything about the coin from a failed run.
    coin is "safe" or "clean", and never say buy or sell. "No linked group of top holders found in the data read" is
    the strongest thing you can say.
 4. Give full addresses and transaction hashes for anything you mention, so the user can look it up.
-5. State what the chain shows; do not state who did it or why. Say "all 11 wallets got ETH from 0x9bf4…, and 17.74 ETH
+5. State what the chain shows; do not state who did it or why. Say "all 11 wallets got ETH from 0x9bf4ef3459e2d376518ebb36bb992c0b38fc2c11, and 17.74 ETH
    went back to it after launch", not "the dev ran 11 wallets and rugged". Do not call anyone a scammer or a rugger.
    A cluster means the wallets are linked by these transactions; it cannot prove one person controls them.
 6. This is not financial advice, and the checks can be wrong or incomplete. Say so once, briefly, at the end.

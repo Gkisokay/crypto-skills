@@ -63,6 +63,10 @@ def assert_chips_clean(test, report):
     check(test, report)
 
 
+SHORT_ADDR = r"[0-9A-Za-z]{4,}(…|\.\.\.)[0-9A-Za-z]{4,}"
+JARGON = ("follow-forward", "magic node", "converge", "start wallets")
+
+
 def load_fixture(name):
     with gzip.open(os.path.join(FIXTURES, name), "rt", encoding="utf-8") as handle:
         return json.load(handle)
@@ -151,6 +155,39 @@ class SeerFixtureTests(unittest.TestCase):
         self.assertAlmostEqual(sum(f["total_eth"] for f in flows), 19.73, delta=0.05)
         self.assertFalse(any(f["returns_home"] for f in flows))
 
+    def test_summary_has_no_shortened_address(self):
+        self.assertNotRegex(self.summary, SHORT_ADDR)
+
+    def test_headline_says_bought_and_held_when_cluster_sold(self):
+        self.assertIn("\n12 wallets that are probably one person or team bought 50.0% of the supply at launch and hold 1.3% now. "
+                      "2 more groups hold 2.0%.\n", self.summary)
+
+    def test_money_after_launch_in_plain_words(self):
+        self.assertIn("\nFollowed 98 ETH payments out of 13 wallets; 0 went back to a wallet that funded them or is linked to them.\n",
+                      self.summary)
+        self.assertIn("  0.3100 ETH 0x7b9b006eef6647a9123c74ab854c117acfc9fd09 -> 0xc1f06f5ecd2ba5313d9dfcf466b3e5913402c40f "
+                      "[sent no ETH on] tx 0x7b24fe03ed129cb18334e5b4fecd2a76157a2d75e86412d9ebda1289d88051c1", self.summary)
+        for word in JARGON:
+            self.assertNotIn(word, self.summary)
+
+    def test_lists_every_cluster_wallet(self):
+        for cluster in self.report["clusters"]:
+            for wallet in cluster["wallets"]:
+                self.assertIn(f"  {wallet} · holds", self.summary)
+
+    def test_repeated_notes_fold_into_one_line(self):
+        self.assertIn("- 18 wallets: txlistinternal included unprocessed-range warning and rows were used. (list: --out <folder>)",
+                      self.summary)
+        self.assertNotIn("0x15e6343db946e2d1f0b56bc54414daddb32300e6: txlistinternal", self.summary)
+        self.assertIn("- 0x1affa14b4a972adfd3f6eebc14c51686ae3081c0: history truncated at 5 pages of 1000 rows.", self.summary)
+        self.assertIn("0x15e6343db946e2d1f0b56bc54414daddb32300e6: txlistinternal included unprocessed-range warning and rows were used.",
+                      self.report["notes"])
+
+    def test_header_lines_read_plainly(self):
+        self.assertTrue(self.summary.startswith("SEER · Robinhood (4663) · "))
+        self.assertIn("generated 2026-11-14T00:00:00Z · holders 25 · people 30 · launch buyers 14 · 0 requests, 0 from cache · "
+                      "2 histories cut short", self.summary)
+
     def test_buys_are_not_proceeds(self):
         router = "0x06afba43fd06227fa663b0daecf536f6eaa6bf99"
         for flow in self.report["follow_forward"]["flows"]:
@@ -223,7 +260,7 @@ class MontraFixtureTests(unittest.TestCase):
 
     def test_cluster_says_why(self):
         why = self.report["clusters"][0]["why"]
-        self.assertTrue(why.startswith("All 11 wallets got ETH from the same wallet 0x9bf4…2c11"), why)
+        self.assertTrue(why.startswith(f"All 11 wallets got ETH from the same wallet {FUNDER_15ETH}"), why)
         self.assertIn("which got ETH back from them", why)
 
     def test_proceeds_home_drawn_as_follow_edge(self):
@@ -232,7 +269,25 @@ class MontraFixtureTests(unittest.TestCase):
         home = [e for e in edges if e["from"] == MONTRA_CREATOR and e["to"] == magic_id]
         self.assertEqual(len(home), 1)
         self.assertAlmostEqual(home[0]["eth"], 17.7397, places=3)
-        self.assertIn("17.74 ETH went back to 0x9bf4…2c11, the wallet that funded them", self.report["clusters"][0]["after"])
+        self.assertIn(f"17.74 ETH went back to {FUNDER_15ETH}, the wallet that funded them", self.report["clusters"][0]["after"])
+
+    def test_summary_has_no_shortened_address(self):
+        self.assertNotRegex(self.summary, SHORT_ADDR)
+        self.assertIn(f"All 11 wallets got ETH from the same wallet {FUNDER_15ETH}", self.summary)
+        self.assertIn(f"After launch: 17.74 ETH went back to {FUNDER_15ETH}, the wallet that funded them.", self.summary)
+
+    def test_headline_unchanged_when_cluster_holds_more_than_it_bought(self):
+        self.assertIn("\n11 wallets that are probably one person or team hold 98.9% of the supply.\n", self.summary)
+
+    def test_money_after_launch_in_plain_words(self):
+        self.assertIn("\nFollowed 1 ETH payment out of 11 wallets; 1 went back to a wallet that funded them or is linked to them.\n",
+                      self.summary)
+        for word in JARGON:
+            self.assertNotIn(word, self.summary)
+
+    def test_header_lines_read_plainly(self):
+        self.assertTrue(self.summary.startswith("MONTRA · Base (8453) · "))
+        self.assertRegex(self.summary, r"· people 12 · launch buyers 3 · \d+ requests, \d+ from cache · 0 histories cut short\n")
 
     def test_chips_clean(self):
         assert_chips_clean(self, self.report)
@@ -578,6 +633,26 @@ class PlainAnswerTests(unittest.TestCase):
             CM.plain_answer(clusters),
             "85 wallets that are probably one person or team hold 12.0% of the supply. 2 more groups hold 4.0%.",
         )
+
+    def test_sold_clusters_say_bought_and_held(self):
+        clusters = [{"wallet_count": 94, "share_now": 0.013, "bought_at_launch": 0.083},
+                    {"wallet_count": 94, "share_now": 0.014, "bought_at_launch": 0.055},
+                    {"wallet_count": 2, "share_now": 0.0, "bought_at_launch": 0.0}]
+        self.assertEqual(
+            CM.plain_answer(clusters),
+            "94 wallets that are probably one person or team bought 8.3% of the supply at launch and hold 1.3% now. "
+            "2 more groups bought 5.5% at launch and hold 1.4% now.",
+        )
+
+
+class SummaryNotesTests(unittest.TestCase):
+    def test_three_repeats_stay_as_they_are(self):
+        notes = [f"0x{i}: same thing." for i in range(3)] + ["other note."]
+        self.assertEqual(CM.summary_note_lines(notes), [f"- 0x{i}: same thing." for i in range(3)] + ["- other note."])
+
+    def test_four_repeats_fold(self):
+        notes = ["0xa: other."] + [f"0x{i}: same thing." for i in range(4)]
+        self.assertEqual(CM.summary_note_lines(notes), ["- 0xa: other.", "- 4 wallets: same thing. (list: --out <folder>)"])
 
 
 if __name__ == "__main__":

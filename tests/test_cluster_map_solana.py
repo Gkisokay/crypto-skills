@@ -6,7 +6,7 @@ import os
 import tempfile
 import unittest
 
-from test_cluster_map_evm import CM, FIXTURES, assert_chips_clean
+from test_cluster_map_evm import CM, FIXTURES, JARGON, SHORT_ADDR, assert_chips_clean
 
 SPIN_MINT = "3yTAs65Jim4mRKp7Nw9zBBjGX6h4mZoD88Bg4Dh4Upwp"
 SPIN_FANOUT = "Hkm9m53BVZsV3SRf23zzq6BVEpcsfz2M6Ucsa837Nzk7"
@@ -210,7 +210,7 @@ class SpinFixtureTests(unittest.TestCase):
 
     def test_card_says_where_the_fanout_clusters_sol_went(self):
         after = self.fanout_cluster()["after"]
-        self.assertTrue(after.startswith("After launch: SOL went to 5odg6z…z4Ah (wallet) · 19 wallets · 23.68 SOL"), after)
+        self.assertTrue(after.startswith(f"After launch: SOL went to {SPIN_COLLECTOR} (the coin's creator) · 19 wallets · 23.68 SOL"), after)
         self.assertIn(after, self.summary)
         collector = [c for c in self.report["follow_forward"]["converge"] if c["address"] == SPIN_COLLECTOR]
         self.assertEqual(len(collector[0]["starts"]), 19)
@@ -219,7 +219,42 @@ class SpinFixtureTests(unittest.TestCase):
         own = {CM.wsol_account(s) for s in self.report["follow_forward"]["starts"]}
         ends = {f["ends_at"] for f in self.report["follow_forward"]["flows"]}
         self.assertEqual(own & ends, set())
-        self.assertIn("read: follow-forward: SOL sent in each wallet's first 200 transactions after launch", self.summary)
+        self.assertIn("read: money after launch: SOL sent in each wallet's first 200 transactions after launch", self.summary)
+
+    def test_summary_has_no_shortened_address(self):
+        self.assertNotRegex(self.summary, SHORT_ADDR)
+        self.assertIn(f"All 94 wallets got SOL from the same wallet {SPIN_FUNDER}", self.summary)
+
+    def test_headline_says_bought_and_held(self):
+        self.assertIn("\n94 wallets that are probably one person or team bought 8.3% of the supply at launch and hold 1.3% now. "
+                      "2 more groups bought 5.5% at launch and hold 1.4% now.\n", self.summary)
+
+    def test_money_after_launch_in_plain_words(self):
+        self.assertIn("\nFollowed 49 SOL payments out of 20 wallets; 0 went back to a wallet that funded them or is linked to them.\n",
+                      self.summary)
+        self.assertIn(f"\n  {SPIN_COLLECTOR} received SOL from 19 of those wallets\n", self.summary)
+        for word in JARGON:
+            self.assertNotIn(word, self.summary)
+
+    def test_creator_line_says_it_received_followed_sol(self):
+        self.assertEqual(self.report["header"]["creator"], SPIN_COLLECTOR)
+        self.assertIn(f"\nCreator {SPIN_COLLECTOR} is not in a cluster, but 19 followed wallets sent it SOL after launch.\n", self.summary)
+        self.assertNotIn("is not linked to any cluster", self.summary)
+        self.assertIn(f"After launch: SOL went to {SPIN_COLLECTOR} (the coin's creator) · 19 wallets · 23.68 SOL", self.summary)
+
+    def test_big_clusters_list_twenty_wallets(self):
+        lines = self.summary.splitlines()
+        self.assertLess(len(lines), 110)
+        rows = sorted(self.report["clusters"][0]["wallet_rows"], key=lambda r: (-r["share_now"], -r["bought_at_launch"]))
+        self.assertIn(f"  {rows[19]['address']} · holds", self.summary)
+        self.assertNotIn(f"  {rows[20]['address']} · holds", self.summary)
+        rest = rows[20:]
+        more = (f"  +74 more wallets holding {CM.fmt_share(sum(r['share_now'] for r in rest))} now, "
+                f"bought {CM.fmt_share(sum(r['bought_at_launch'] for r in rest))} at launch (full list: run with --out <folder>)")
+        self.assertIn(more, lines)
+
+    def test_header_names_the_chain_once(self):
+        self.assertTrue(self.summary.startswith(f"SPIN · Solana · {SPIN_MINT}\n"))
 
     def test_chips_clean(self):
         assert_chips_clean(self, self.report)

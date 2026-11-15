@@ -45,6 +45,8 @@ FOLLOW_HOPS = 3
 FOLLOW_MIN_WEI = 5 * 10**16
 FOLLOW_BUDGET_S = 180
 FOLLOW_MAX_STARTS = 20
+SUMMARY_MAX_WALLETS = 20
+SUMMARY_NOTE_FOLD = 4
 FOLLOW_MAX_SELLS = 12
 BURST_MIN_WALLETS = 3
 BURST_MIN_SHARE = 0.005
@@ -2186,9 +2188,9 @@ def link_phrase(kind, node):
             return n, 0, f"bought {fmt_share(node.get('share_total', 0.0))} at launch within {span} of each other in near-equal amounts"
         if node["subtype"] == "busy-funder-window":
             funders = node.get("funder_addresses") or [""]
-            return n, 3, f"were funded by the same busy wallet {tiny_addr(funders[0])} within {span}"
+            return n, 3, f"were funded by the same busy wallet {funders[0]} within {span}"
         return n, 2, f"got their first ETH within {span} of each other"
-    who = tiny_addr(node["address"])
+    who = node["address"]
     if node["role"] == "both" and node.get("loop_wallets"):
         return n, 1, f"got ETH from the same wallet {who}, which got ETH back from them"
     if node["role"] == "both":
@@ -2267,7 +2269,7 @@ def follow_view(clusters, follow, magic_nodes):
             eth = sum(f["total_eth"] for f in group)
             chips.append({
                 "text": f"ETH out → {tiny_addr(addr)} ({desc}) · {len(starts)} wallet{'s' if len(starts) != 1 else ''} · {eth:.2f} ETH",
-                "starts": starts, "eth": eth, "address": addr, "stop": stop,
+                "starts": starts, "eth": eth, "address": addr, "stop": stop, "desc": desc,
             })
         if rest:
             flows_rest = [f for _, g in rest for f in g]
@@ -2286,7 +2288,7 @@ def follow_view(clusters, follow, magic_nodes):
     return view
 
 
-def cluster_after(view_entry):
+def cluster_after(view_entry, creator=""):
     """One plain sentence on where the cluster's ETH went after launch, or '' when nothing was followed."""
     if not view_entry:
         return ""
@@ -2298,9 +2300,14 @@ def cluster_after(view_entry):
         stops[edge["address"]] = edge["stop"]
     for addr, eth in sorted(home.items(), key=lambda kv: -kv[1]):
         whose = "the wallet that funded them" if stops[addr].startswith("back to") else "a wallet linked to them"
-        parts.append(f"{eth:.2f} ETH went back to {tiny_addr(addr)}, {whose}")
+        parts.append(f"{eth:.2f} ETH went back to {addr}, {whose}")
     for chip in view_entry["chips"]:
-        parts.append(chip["text"].replace("ETH out → ", "ETH went to ", 1))
+        if chip["address"]:
+            n = len(chip["starts"])
+            desc = "the coin's creator" if chip["address"] == creator else chip["desc"]
+            parts.append(f"ETH went to {chip['address']} ({desc}) · {n} wallet{'s' if n != 1 else ''} · {chip['eth']:.2f} ETH")
+        else:
+            parts.append(chip["text"].replace("ETH out → ", "ETH went to ", 1))
     return ("After launch: " + "; ".join(parts) + ".") if parts else ""
 
 
@@ -2638,9 +2645,20 @@ def plain_answer(clusters):
     if not clusters:
         return "No group of top holders looks linked in the data read."
     top, rest = clusters[0], clusters[1:]
-    text = f"{top.get('wallet_count', 0)} wallets that are probably one person or team hold {fmt_share(top.get('share_now', 0.0))} of the supply."
+    now, bought = top.get("share_now", 0.0), top.get("bought_at_launch", 0.0)
+    if bought > now:
+        text = (f"{top.get('wallet_count', 0)} wallets that are probably one person or team bought {fmt_share(bought)} "
+                f"of the supply at launch and hold {fmt_share(now)} now.")
+    else:
+        text = f"{top.get('wallet_count', 0)} wallets that are probably one person or team hold {fmt_share(now)} of the supply."
     if rest:
-        text += f" {len(rest)} more group{'s' if len(rest) != 1 else ''} hold {fmt_share(sum(c.get('share_now', 0.0) for c in rest))}."
+        now = sum(c.get("share_now", 0.0) for c in rest)
+        bought = sum(c.get("bought_at_launch", 0.0) for c in rest)
+        groups = f"{len(rest)} more group{'s' if len(rest) != 1 else ''}"
+        if bought > now:
+            text += f" {groups} bought {fmt_share(bought)} at launch and hold {fmt_share(now)} now."
+        else:
+            text += f" {groups} hold {fmt_share(now)}."
     return text
 
 
@@ -2849,11 +2867,12 @@ def compute_layout(graph, clusters, follow_by_rank=None):
 
 def make_header_lines(report):
     hdr = report["header"]
-    line1 = f"{hdr['symbol']} · {hdr['chain_name']} ({hdr['chain_id']}) · {hdr['token']}"
+    chain = f"{hdr['chain_name']} ({hdr['chain_id']})" if isinstance(hdr["chain_id"], int) else hdr["chain_name"]
+    line1 = f"{hdr['symbol']} · {chain} · {hdr['token']}"
     line2 = (
-        f"generated {hdr['generated_at_utc']} · holders {hdr['holders_read']} · persons {hdr['persons']} · "
-        f"launch buyers {hdr['launch_buyer_count']} · calls {hdr['calls_made']} / cache {hdr['cache_hits']} · "
-        f"truncated {len(hdr['truncated_histories'])}"
+        f"generated {hdr['generated_at_utc']} · holders {hdr['holders_read']} · people {hdr['persons']} · "
+        f"launch buyers {hdr['launch_buyer_count']} · {hdr['calls_made']} requests, {hdr['cache_hits']} from cache · "
+        f"{len(hdr['truncated_histories'])} histories cut short"
     )
     return line1, line2
 
@@ -2870,14 +2889,27 @@ def build_summary(report):
         if cluster.get("strongest_example_hash"):
             lines.append(f"Example transaction: {cluster['strongest_example_hash']}")
         lines.append("Wallets:")
+        rows = cluster["wallet_rows"]
+        if len(rows) > SUMMARY_MAX_WALLETS:
+            rows = sorted(rows, key=lambda r: (-r["share_now"], -r["bought_at_launch"]))
         lines += [f"  {row['address']} · holds {as_pct(row['share_now'])} · bought {as_pct(row['bought_at_launch'])} at launch"
-                  for row in cluster["wallet_rows"]]
+                  for row in rows[:SUMMARY_MAX_WALLETS]]
+        rest = rows[SUMMARY_MAX_WALLETS:]
+        if rest:
+            lines.append(f"  +{len(rest)} more wallets holding {fmt_share(sum(r['share_now'] for r in rest))} now, "
+                         f"bought {fmt_share(sum(r['bought_at_launch'] for r in rest))} at launch (full list: run with --out <folder>)")
     unlinked = report.get("unclustered_wallets", [])
     if unlinked:
         lines += ["", f"Not linked to anyone: {len(unlinked)} wallet{'s' if len(unlinked) != 1 else ''} holding {as_pct(sum(r['share_now'] for r in unlinked))}."]
     creator = report["header"].get("creator")
     if creator and not any(creator in c["wallets"] for c in clusters):
-        lines.append(f"Creator {creator} is not linked to any cluster.")
+        follow_data = report.get("follow_forward") or {}
+        senders = {f["start"] for f in follow_data.get("flows", []) if any(h["to"] == creator for h in f["hops"])}
+        senders |= {s for item in follow_data.get("converge", []) if item["address"] == creator for s in item["starts"]}
+        if senders:
+            lines.append(f"Creator {creator} is not in a cluster, but {len(senders)} followed wallets sent it ETH after launch.")
+        else:
+            lines.append(f"Creator {creator} is not linked to any cluster.")
     follow = follow_summary_lines(report.get("follow_forward"))
     if follow:
         lines += ["", "Where the money went after launch:"] + follow
@@ -2889,8 +2921,21 @@ def build_summary(report):
                      f"are re-read after {CACHE_MAX_AGE_S // 60} min)")
     notes = report.get("notes", [])
     if notes:
-        lines += ["", "Notes:"] + [f"- {note}" for note in notes]
+        lines += ["", "Notes:"] + summary_note_lines(notes)
     return "\n".join(lines)
+
+
+def summary_note_lines(notes):
+    texts = [m.group(1) if m else None for m in (re.match(r"\S+: (.+)$", note) for note in notes)]
+    counts = collections.Counter(t for t in texts if t)
+    out, done = [], set()
+    for note, text in zip(notes, texts):
+        if counts[text] < SUMMARY_NOTE_FOLD:
+            out.append(f"- {note}")
+        elif text not in done:
+            done.add(text)
+            out.append(f"- {counts[text]} wallets: {text} (list: --out <folder>)")
+    return out
 
 
 def follow_summary_lines(follow, limit=5):
@@ -2899,14 +2944,16 @@ def follow_summary_lines(follow, limit=5):
     flows = [f for f in follow["flows"] if f["hops"]]
     home = [f for f in flows if f["returns_home"]]
     out = [
-        f"follow-forward: {len(flows)} ETH paths from {len(follow['starts'])} start wallets, "
-        f"{len(home)} back to a funder or magic node{' (cut by time budget)' if follow.get('cut_by_budget') else ''}"
+        f"Followed {len(flows)} ETH payment{'s' if len(flows) != 1 else ''} out of {len(follow['starts'])} wallets; "
+        f"{len(home)} went back to a wallet that funded them or is linked to them."
+        + (f" Stopped early at the {FOLLOW_BUDGET_S} s limit." if follow.get("cut_by_budget") else "")
     ]
     for flow in flows[:limit]:
         route = " -> ".join([flow["start"]] + [h["to"] for h in flow["hops"]])
-        out.append(f"  {flow['total_eth']:.4f} ETH {route} [{flow['stop']}] tx {flow['hops'][-1]['hash']}")
+        stop = "reached a wallet linked to them" if flow["stop"] == "reached magic node" else flow["stop"]
+        out.append(f"  {flow['total_eth']:.4f} ETH {route} [{stop}] tx {flow['hops'][-1]['hash']}")
     for item in follow.get("converge", [])[:limit]:
-        out.append(f"  converge: {item['address']} reached from {len(item['starts'])} start wallets")
+        out.append(f"  {item['address']} received ETH from {len(item['starts'])} of those wallets")
     return out
 
 
@@ -3016,18 +3063,18 @@ def build_report(token, top, blockscout_client, rpc_client, stats, generated_at,
         follow["elapsed_s"] = round(time.monotonic() - t_follow, 1)
         if isinstance(blockscout_client, SolanaSource):
             coverage.append(
-                f"follow-forward: SOL sent in each wallet's first {SOL_FOLLOW_PAGES * SOL_PAGE} transactions after launch; "
+                f"money after launch: SOL sent in each wallet's first {SOL_FOLLOW_PAGES * SOL_PAGE} transactions after launch; "
                 "SOL wrapped for trades not counted"
             )
     else:
         follow = None
-        coverage.append(f"follow-forward: not run on {chain['name']} yet")
+        coverage.append(f"money after launch: not followed on {chain['name']} yet")
     person_links = collect_person_link_text(persons, direct_pairs, magic_nodes, time_nodes)
     graph = build_graph(person_rows, rank_map, direct_pairs, magic_nodes, time_nodes)
     follow_by_rank = follow_view(clusters, follow, magic_nodes)
     for cluster in clusters:
         cluster["why"] = cluster_why(cluster)
-        cluster["after"] = cluster_after(follow_by_rank.get(cluster["rank"]))
+        cluster["after"] = cluster_after(follow_by_rank.get(cluster["rank"]), launch["creator"])
     layout, layout_meta = compute_layout(graph, clusters, follow_by_rank)
 
     rules = {

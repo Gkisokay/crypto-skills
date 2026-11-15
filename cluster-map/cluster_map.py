@@ -115,21 +115,6 @@ DEFAULT_CACHE_DIR = "~/.cache/cluster-map/"
 CACHE_MAX_AGE_S = 3600
 MAX_HISTORY_PAGES = 5
 
-CANVAS_WIDTH = 1150.0
-CLUSTER_TILE_MIN_H = 220.0
-CLUSTER_TILE_MAX_H = 420.0
-CLUSTER_TILE_GAP = 18.0
-CLUSTER_TILE_PADDING = 12.0
-CLUSTER_TITLE_H = 24.0
-CLUSTER_MEMBER_GAP = 2.0
-UNCLUSTERED_MIN_R = 3.0
-CHIP_H = 18.0
-CHIP_ICON_W = 18.0
-CHIP_CHAR_W = 5.6
-CHIP_GAP = 6.0
-TEXT_CHAR_W = 6.0
-TEXT_LINE_H = 14.0
-MAX_CHIPS_PER_TILE = 8
 FOLLOW_CHIPS_MAX = 3
 
 EVM_ADDRESS_RE = re.compile(r"0x[0-9a-fA-F]{40}")
@@ -2156,29 +2141,6 @@ def fmt_share(value):
     return f"{pct:.1f}%" if pct >= 1 or pct == 0 else f"{pct:.2f}%"
 
 
-def time_chip_text(node):
-    start, end = node.get("window_start", 0), node.get("window_end", 0)
-    span, when = fmt_span(end - start), fmt_when(start)
-    if node["subtype"] == "launch-burst":
-        return f"bought within {span} · {when}"
-    if node["subtype"] == "busy-funder-window":
-        funders = node.get("funder_addresses") or [""]
-        return f"funded by {tiny_addr(funders[0])} within {span} · {when}"
-    return f"first ETH within {span} · {when}"
-
-
-def magic_chip_text(node):
-    n = len(node["wallets"])
-    who = tiny_addr(node["address"])
-    if node["role"] == "both" and node.get("loop_wallets"):
-        return f"{who} · funded {len(node['funded'])}, paid back by {len(node['paid_back_by'])}"
-    if node["role"] == "both":
-        return f"{who} · sent to and received from {n}"
-    if node["role"] == "funder":
-        return f"{who} · sent ETH to {n}"
-    return f"{who} · received from {n}"
-
-
 def link_phrase(kind, node):
     """(wallets covered, tie-break priority, phrase) for one reason a cluster's wallets are linked."""
     n = len(node["wallets"])
@@ -2618,21 +2580,6 @@ def pack_circles_in_rect(items, rect, min_radius, max_radius, gap, obstacles):
     return placed, radii
 
 
-def wrap_text(text, width_px, char_w=TEXT_CHAR_W):
-    """Greedy word wrap by an estimated character width (SVG has no text wrapping)."""
-    max_chars = max(12, int(width_px / char_w))
-    lines, cur = [], ""
-    for word in str(text).split():
-        if cur and len(cur) + 1 + len(word) > max_chars:
-            lines.append(cur)
-            cur = word
-        else:
-            cur = f"{cur} {word}" if cur else word
-    if cur:
-        lines.append(cur)
-    return lines
-
-
 def tile_title(cluster):
     n = cluster.get("wallet_count", 0)
     return (
@@ -2660,209 +2607,6 @@ def plain_answer(clusters):
         else:
             text += f" {groups} hold {fmt_share(now)}."
     return text
-
-
-def chip_width(text):
-    return CHIP_ICON_W + len(text) * CHIP_CHAR_W + 8.0
-
-
-def flow_chips(specs, x0, x1, y0):
-    """Place chips left to right, wrapping into rows; returns placed chips and the bottom y."""
-    placed = []
-    x, y = x0, y0
-    for spec in specs:
-        w = min(chip_width(spec["text"]), x1 - x0)
-        if x > x0 and x + w > x1:
-            x = x0
-            y += CHIP_H + CHIP_GAP * 0.5
-        chip = dict(spec)
-        chip.update({"x": x, "y": y, "width": w, "height": CHIP_H, "icon_x": x + CHIP_ICON_W * 0.5, "icon_y": y + CHIP_H * 0.5})
-        placed.append(chip)
-        x += w + CHIP_GAP
-    bottom = (y + CHIP_H) if placed else y0
-    return placed, bottom
-
-
-def link_chip_specs(hubs, rank, eth_home=None):
-    eth_home = eth_home or {}
-    hubs = sorted(hubs, key=lambda n: (-len(n.get("wallets", [])), 0 if n["type"] == "time" else 1, n["id"]))
-    shown = hubs if len(hubs) <= MAX_CHIPS_PER_TILE else hubs[: MAX_CHIPS_PER_TILE - 1]
-    specs = []
-    for node in shown:
-        text = time_chip_text(node) if node["type"] == "time" else magic_chip_text(node)
-        if eth_home.get(node["id"]):
-            text += f" · got {eth_home[node['id']]:.2f} ETH back"
-        specs.append({"id": f"chip-{node['id']}", "node_id": node["id"], "rank": rank, "kind": node["type"], "text": text})
-    hidden = len(hubs) - len(shown)
-    if hidden:
-        specs.append({
-            "id": f"chip-more-{rank}", "node_id": "", "rank": rank, "kind": "more",
-            "text": f"+{hidden} more shared wallets or moments (not drawn)",
-        })
-    return specs
-
-
-def compute_layout(graph, clusters, follow_by_rank=None):
-    nodes = graph["nodes"]
-    follow_by_rank = follow_by_rank or {}
-    if not nodes:
-        return {}, {
-            "canvas": {"width": CANVAS_WIDTH, "height": 320.0},
-            "tiles": [],
-            "unclustered_strip": {},
-            "person_radii": {},
-            "chips": [],
-            "follow_edges": [],
-        }
-
-    node_by_id = {node["id"]: node for node in nodes}
-    positions = {}
-    person_radii = {}
-    chips = []
-    follow_edges = []
-    outer_pad = 14.0
-    tile_gap = CLUSTER_TILE_GAP
-    cluster_count = len(clusters)
-    cols = 1 if cluster_count <= 1 else 2 if cluster_count <= 4 else 3
-    usable_w = CANVAS_WIDTH - 2 * outer_pad - (cols - 1) * tile_gap
-    tile_w = usable_w / cols
-
-    hubs_by_rank = collections.defaultdict(list)
-    for node in nodes:
-        if node["type"] not in ("magic", "time"):
-            continue
-        ranks = sorted({node_by_id[w]["cluster_rank"] for w in node.get("wallets", []) if w in node_by_id and node_by_id[w]["cluster_rank"] > 0})
-        if len(ranks) == 1:
-            hubs_by_rank[ranks[0]].append(node)
-
-    def place_tile(cluster, x, y):
-        rank = cluster["rank"]
-        x0 = x + CLUSTER_TILE_PADDING
-        x1 = x + tile_w - CLUSTER_TILE_PADDING
-        title_lines = wrap_text(tile_title(cluster), x1 - x0 - 14.0)
-        why_lines = wrap_text(cluster.get("why", ""), x1 - x0)
-        text_bottom = y + CLUSTER_TILE_PADDING + TEXT_LINE_H * (len(title_lines) + len(why_lines))
-        head = y + CLUSTER_TITLE_H + CLUSTER_TILE_PADDING
-        cursor = max(head, text_bottom + 6.0)
-        view = follow_by_rank.get(rank, {})
-        eth_home = collections.defaultdict(float)
-        for edge in view.get("home", []):
-            eth_home[edge["to"]] += edge["eth"]
-        link_chips, cursor_after = flow_chips(link_chip_specs(hubs_by_rank.get(rank, []), rank, eth_home), x0, x1, cursor)
-        for chip in link_chips:
-            if chip["node_id"]:
-                positions[chip["node_id"]] = {"x": chip["icon_x"], "y": chip["icon_y"]}
-        member_y0 = (cursor_after + 10.0) if link_chips else cursor
-        members = sorted(cluster["wallets"], key=lambda nid: (-display_share(node_by_id[nid]), nid))
-        members = [m for m in members if m in node_by_id]
-        content_w = max(90.0, x1 - x0)
-        areas, max_d = 0.0, 10.0
-        for nid in members:
-            r0 = min(28.0, max(5.0, base_member_radius(display_share(node_by_id[nid]))))
-            areas += math.pi * r0 * r0
-            max_d = max(max_d, 2.0 * r0)
-        member_h = max(24.0, min(CLUSTER_TILE_MAX_H, (areas / content_w) * 1.28 + max_d))
-        items = [{"id": nid, "share": display_share(node_by_id[nid])} for nid in members]
-        max_r = max(8.0, min(content_w * 0.23, member_h * 0.45))
-        placed, radii = pack_circles_in_rect(items, (x0, member_y0, x1, member_y0 + member_h), 5.0, max_r, CLUSTER_MEMBER_GAP, [])
-        for nid in members:
-            px, py = placed[nid]
-            positions[nid] = {"x": px, "y": py}
-            person_radii[nid] = radii[nid]
-        member_bottom = max([positions[n]["y"] + person_radii[n] for n in members] or [member_y0])
-        used_bottom = max(member_bottom, cursor_after)
-        specs = [
-            {"id": f"chip-follow-{rank}-{i}", "node_id": f"follow-{rank}-{i}", "rank": rank, "kind": "follow", "text": c["text"], "starts": c["starts"], "eth": c["eth"]}
-            for i, c in enumerate(view.get("chips", []))
-        ]
-        follow_chips, follow_bottom = flow_chips(specs, x0, x1, used_bottom + 14.0)
-        for chip in follow_chips:
-            positions[chip["node_id"]] = {"x": chip["icon_x"], "y": chip["icon_y"]}
-            for start in chip.pop("starts"):
-                if start in positions:
-                    follow_edges.append({"from": start, "to": chip["node_id"], "eth": None, "rank": rank})
-        for edge in view.get("home", []):
-            if edge["to"] in positions and edge["from"] in positions:
-                follow_edges.append({"from": edge["from"], "to": edge["to"], "eth": edge["eth"], "rank": rank})
-        if follow_chips:
-            used_bottom = follow_bottom
-        chips.extend(link_chips + follow_chips)
-        packed = max(0.0, used_bottom - head)
-        tile = {
-            "rank": rank,
-            "x": x,
-            "y": y,
-            "width": tile_w,
-            "height": CLUSTER_TITLE_H + 2 * CLUSTER_TILE_PADDING + packed,
-            "member_ids": list(members),
-            "hub_ids": [c["node_id"] for c in link_chips if c["node_id"]],
-            "packed_content_height": packed,
-            "title_lines": title_lines,
-            "why_lines": why_lines,
-        }
-        return tile
-
-    tiles = []
-    y = 14.0
-    for idx in range(0, cluster_count, cols):
-        row = [place_tile(cluster, outer_pad + j * (tile_w + tile_gap), y) for j, cluster in enumerate(clusters[idx : idx + cols])]
-        tiles.extend(row)
-        y += max(t["height"] for t in row) + tile_gap
-
-    unclustered_ids = sorted(
-        [node["id"] for node in nodes if node["type"] == "person" and node.get("cluster_rank", 0) == 0],
-        key=lambda nid: (-display_share(node_by_id[nid]), nid),
-    )
-    strip_top = y + 2.0
-    strip_x = 14.0
-    strip_w = CANVAS_WIDTH - 28.0
-    strip_title_h = 18.0
-    pack_x0 = strip_x + 8.0
-    pack_x1 = strip_x + strip_w - 8.0
-    x = pack_x0
-    y_cursor = strip_top + strip_title_h + 8.0
-    row_h = 0.0
-    strip_bottom = y_cursor
-    for nid in unclustered_ids:
-        share = display_share(node_by_id[nid])
-        r = max(UNCLUSTERED_MIN_R, min(10.0, UNCLUSTERED_MIN_R + math.sqrt(max(share, 0.0)) * 22.0))
-        if x + 2 * r > pack_x1:
-            x = pack_x0
-            y_cursor += row_h + 5.0
-            row_h = 0.0
-        cx = x + r
-        cy = y_cursor + r
-        positions[nid] = {"x": cx, "y": cy}
-        person_radii[nid] = r
-        x += 2 * r + 4.0
-        row_h = max(row_h, 2 * r)
-        strip_bottom = max(strip_bottom, cy + r)
-    strip_h = (strip_bottom - strip_top) + 10.0
-    if strip_h < 36.0:
-        strip_h = 36.0
-    strip = {
-        "x": strip_x,
-        "y": strip_top,
-        "width": strip_w,
-        "height": strip_h,
-        "member_ids": unclustered_ids,
-    }
-
-    for node in nodes:
-        if node["id"] in positions or node["type"] != "person":
-            continue
-        positions[node["id"]] = {"x": CANVAS_WIDTH * 0.5, "y": strip_top + strip_h * 0.5}
-
-    canvas_h = max(strip_top + strip_h + 12.0, 320.0)
-    meta = {
-        "canvas": {"width": CANVAS_WIDTH, "height": canvas_h},
-        "tiles": tiles,
-        "unclustered_strip": strip,
-        "person_radii": person_radii,
-        "chips": chips,
-        "follow_edges": follow_edges,
-    }
-    return positions, meta
 
 
 def make_header_lines(report):
@@ -3075,7 +2819,6 @@ def build_report(token, top, blockscout_client, rpc_client, stats, generated_at,
     for cluster in clusters:
         cluster["why"] = cluster_why(cluster)
         cluster["after"] = cluster_after(follow_by_rank.get(cluster["rank"]), launch["creator"])
-    layout, layout_meta = compute_layout(graph, clusters, follow_by_rank)
 
     rules = {
         "BUSY_NONCE": BUSY_NONCE,
@@ -3129,8 +2872,6 @@ def build_report(token, top, blockscout_client, rpc_client, stats, generated_at,
         "unclustered_wallets": unclustered_wallets,
         "follow_forward": follow,
         "graph": graph,
-        "layout": layout,
-        "layout_meta": layout_meta,
         "person_links": person_links,
         "native": chain.get("native", "ETH"),
     }
@@ -3138,9 +2879,6 @@ def build_report(token, top, blockscout_client, rpc_client, stats, generated_at,
         for cluster in clusters:
             for key in ("why", "after"):
                 cluster[key] = native_word(cluster.get(key, ""), report["native"])
-        for chip in layout_meta.get("chips", []):
-            if isinstance(chip, dict) and "text" in chip:
-                chip["text"] = native_word(chip["text"], report["native"])
     return report
 
 

@@ -214,7 +214,6 @@ class ClusterMapTests(unittest.TestCase):
         fake_rpc = FakeRpcClient(codes=codes, nonces=nonces)
 
         report, _, json_text = run_map(fake_bs, fake_rpc, token=token)
-        self.assertIn("first ETH within 3 min · Jan 1 00:16 UTC", [c["text"] for c in report["layout_meta"]["chips"]])
         wave_nodes = [x for x in report["time_nodes"] if x["subtype"] == "funding-wave"]
         self.assertEqual(len(wave_nodes), 1)
         self.assertEqual(set(wave_nodes[0]["wallets"]), set(people))
@@ -693,96 +692,7 @@ def layout_fixture_clients():
     return token, fake_bs, fake_rpc
 
 
-def boxes_overlap(a, b):
-    return not (
-        a["x"] + a["width"] <= b["x"]
-        or b["x"] + b["width"] <= a["x"]
-        or a["y"] + a["height"] <= b["y"]
-        or b["y"] + b["height"] <= a["y"]
-    )
-
-
-def assert_chips_clean(test, report):
-    """Chips (labelled magic/time/follow nodes) never overlap each other or a wallet circle, and sit inside their tile."""
-    meta = report["layout_meta"]
-    chips = meta["chips"]
-    tiles = {t["rank"]: t for t in meta["tiles"]}
-    test.assertGreaterEqual(len(chips), 1)
-    for i, a in enumerate(chips):
-        tile = tiles[a["rank"]]
-        test.assertGreaterEqual(a["x"], tile["x"] - 1e-9)
-        test.assertLessEqual(a["x"] + a["width"], tile["x"] + tile["width"] + 1e-9)
-        test.assertGreaterEqual(a["y"], tile["y"] - 1e-9)
-        test.assertLessEqual(a["y"] + a["height"], tile["y"] + tile["height"] + 1e-9)
-        for b in chips[i + 1 :]:
-            test.assertFalse(boxes_overlap(a, b), (a["text"], b["text"]))
-        for nid in tile["member_ids"]:
-            p, r = report["layout"][nid], meta["person_radii"][nid]
-            circle = {"x": p["x"] - r, "y": p["y"] - r, "width": 2 * r, "height": 2 * r}
-            test.assertFalse(boxes_overlap(a, circle), (a["text"], nid))
-
-
-class LayoutTests(unittest.TestCase):
-    def test_tile_geometry_and_strip(self):
-        token, fake_bs, fake_rpc = layout_fixture_clients()
-        report, _, _ = run_map(fake_bs, fake_rpc, token=token)
-        layout = report["layout"]
-        meta = report["layout_meta"]
-        person_r = meta["person_radii"]
-        tiles = meta["tiles"]
-        strip = meta["unclustered_strip"]
-
-        for i in range(len(tiles)):
-            a = tiles[i]
-            for j in range(i + 1, len(tiles)):
-                b = tiles[j]
-                overlap = not (
-                    a["x"] + a["width"] <= b["x"]
-                    or b["x"] + b["width"] <= a["x"]
-                    or a["y"] + a["height"] <= b["y"]
-                    or b["y"] + b["height"] <= a["y"]
-                )
-                self.assertFalse(overlap)
-
-        for tile in tiles:
-            members = tile["member_ids"]
-            for nid in members:
-                p = layout[nid]
-                r = person_r[nid]
-                self.assertGreaterEqual(p["x"] - r, tile["x"] - 1e-9)
-                self.assertLessEqual(p["x"] + r, tile["x"] + tile["width"] + 1e-9)
-                self.assertGreaterEqual(p["y"] - r, tile["y"] - 1e-9)
-                self.assertLessEqual(p["y"] + r, tile["y"] + tile["height"] + 1e-9)
-            for i in range(len(members)):
-                for j in range(i + 1, len(members)):
-                    a = members[i]
-                    b = members[j]
-                    pa = layout[a]
-                    pb = layout[b]
-                    ra = person_r[a]
-                    rb = person_r[b]
-                    self.assertGreaterEqual(math.hypot(pa["x"] - pb["x"], pa["y"] - pb["y"]) + 1e-9, ra + rb)
-
-        max_bottom = max(t["y"] + t["height"] for t in tiles)
-        self.assertGreaterEqual(strip["y"], max_bottom)
-        for nid in strip["member_ids"]:
-            p = layout[nid]
-            r = person_r[nid]
-            self.assertGreaterEqual(p["x"] - r, strip["x"] - 1e-9)
-            self.assertLessEqual(p["x"] + r, strip["x"] + strip["width"] + 1e-9)
-            self.assertGreaterEqual(p["y"] - r, strip["y"] - 1e-9)
-            self.assertLessEqual(p["y"] + r, strip["y"] + strip["height"] + 1e-9)
-        for tile in tiles:
-            max_allowed = tile["packed_content_height"] + CM.CLUSTER_TITLE_H + 2 * CM.CLUSTER_TILE_PADDING + 10.0
-            self.assertLessEqual(tile["height"], max_allowed + 1e-9)
-
-    def test_layout_is_deterministic(self):
-        token, fake_bs, fake_rpc = layout_fixture_clients()
-        report1, _, _ = run_map(fake_bs, fake_rpc, token=token)
-        token2, fake_bs2, fake_rpc2 = layout_fixture_clients()
-        report2, _, _ = run_map(fake_bs2, fake_rpc2, token=token2)
-        self.assertEqual(report1["layout"], report2["layout"])
-        self.assertEqual(report1["layout_meta"], report2["layout_meta"])
+class UnlinkedTests(unittest.TestCase):
 
     def test_unlinked_holders_counted_and_json_has_shares(self):
         token, fake_bs, fake_rpc = layout_fixture_clients()
@@ -790,8 +700,3 @@ class LayoutTests(unittest.TestCase):
         self.assertIn(f"Not linked to anyone: {len(report['unclustered_wallets'])} wallet", summary)
         self.assertIn("share_now_pct", json_text)
         self.assertIn("bought_at_launch_pct", json_text)
-
-    def test_chips_do_not_overlap_and_stay_in_their_tile(self):
-        token, fake_bs, fake_rpc = layout_fixture_clients()
-        report, _, _ = run_map(fake_bs, fake_rpc, token=token)
-        assert_chips_clean(self, report)

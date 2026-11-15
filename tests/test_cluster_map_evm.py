@@ -54,15 +54,6 @@ MONTRA_BOT_BUYERS = {
 }
 
 
-def assert_chips_clean(test, report):
-    import sys
-
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from test_cluster_map import assert_chips_clean as check
-
-    check(test, report)
-
-
 SHORT_ADDR = r"[0-9A-Za-z]{4,}(…|\.\.\.)[0-9A-Za-z]{4,}"
 JARGON = ("follow-forward", "magic node", "converge", "start wallets")
 
@@ -102,20 +93,10 @@ class SeerFixtureTests(unittest.TestCase):
         self.assertEqual(why.count(". "), 0)
         self.assertIn(why, self.summary)
 
-    def test_time_chips_read_plainly(self):
-        texts = [c["text"] for c in self.report["layout_meta"]["chips"] if c["kind"] == "time"]
-        self.assertIn("bought within 1 s · Nov 4 14:40 UTC", texts)
-        self.assertTrue(any(t.startswith("first ETH within 3 min · ") for t in texts), texts)
-
-    def test_sale_payouts_are_one_follow_chip(self):
-        chips = [c for c in self.report["layout_meta"]["chips"] if c["kind"] == "follow"]
-        self.assertEqual(len(chips), 1)
-        self.assertRegex(chips[0]["text"], r"^ETH out → \d+ new wallets · 19\.7\d ETH \(paid from their sells\)$")
-        edges = [e for e in self.report["layout_meta"]["follow_edges"] if e["to"] == chips[0]["node_id"]]
-        self.assertGreaterEqual(len(edges), 10)
-
-    def test_chips_clean(self):
-        assert_chips_clean(self, self.report)
+    def test_sale_payouts_are_one_line_in_the_answer(self):
+        after = self.report["clusters"][0]["after"]
+        self.assertEqual(after.count("paid from their sells"), 1, after)
+        self.assertRegex(after, r"ETH went to \d+ new wallets · 19\.7\d ETH \(paid from their sells\)")
 
     def test_bundle_is_one_cluster(self):
         top = self.report["clusters"][0]
@@ -263,12 +244,7 @@ class MontraFixtureTests(unittest.TestCase):
         self.assertTrue(why.startswith(f"All 11 wallets got ETH from the same wallet {FUNDER_15ETH}"), why)
         self.assertIn("which got ETH back from them", why)
 
-    def test_proceeds_home_drawn_as_follow_edge(self):
-        magic_id = self.funder_node()["id"]
-        edges = self.report["layout_meta"]["follow_edges"]
-        home = [e for e in edges if e["from"] == MONTRA_CREATOR and e["to"] == magic_id]
-        self.assertEqual(len(home), 1)
-        self.assertAlmostEqual(home[0]["eth"], 17.7397, places=3)
+    def test_proceeds_home_in_the_after_line(self):
         self.assertIn(f"17.74 ETH went back to {FUNDER_15ETH}, the wallet that funded them", self.report["clusters"][0]["after"])
 
     def test_summary_has_no_shortened_address(self):
@@ -288,9 +264,6 @@ class MontraFixtureTests(unittest.TestCase):
     def test_header_lines_read_plainly(self):
         self.assertTrue(self.summary.startswith("MONTRA · Base (8453) · "))
         self.assertRegex(self.summary, r"· people 12 · launch buyers 3 · \d+ requests, \d+ from cache · 0 histories cut short\n")
-
-    def test_chips_clean(self):
-        assert_chips_clean(self, self.report)
 
     def test_funder_not_duplicated_as_time_node(self):
         for node in self.report["time_nodes"]:

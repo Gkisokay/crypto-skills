@@ -6,7 +6,7 @@ import os
 import tempfile
 import unittest
 
-from test_cluster_map_evm import CM, FIXTURES, JARGON, SHORT_ADDR, assert_chips_clean
+from test_cluster_map_evm import CM, FIXTURES, JARGON, SHORT_ADDR
 
 SPIN_MINT = "3yTAs65Jim4mRKp7Nw9zBBjGX6h4mZoD88Bg4Dh4Upwp"
 SPIN_FANOUT = "Hkm9m53BVZsV3SRf23zzq6BVEpcsfz2M6Ucsa837Nzk7"
@@ -255,9 +255,6 @@ class SpinFixtureTests(unittest.TestCase):
 
     def test_header_names_the_chain_once(self):
         self.assertTrue(self.summary.startswith(f"SPIN · Solana · {SPIN_MINT}\n"))
-
-    def test_chips_clean(self):
-        assert_chips_clean(self, self.report)
 
 
 if __name__ == "__main__":

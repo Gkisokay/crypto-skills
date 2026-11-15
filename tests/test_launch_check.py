@@ -90,13 +90,13 @@ class RpcBatch(unittest.TestCase):
         # Robinhood's RPC rate-limits single items inside a batch (Nov 10); those must not become empty blocks
         replies = [[{"id": 0, "result": "0x1"}, {"id": 1, "error": {"code": 429}}],
                    [{"id": 0, "result": "0x1"}, {"id": 1, "result": "0x2"}]]
-        cc.http_json = lambda url, body=None: replies.pop(0)
+        cc.http_json = lambda url, body=None, **kw: replies.pop(0)
         self.assertEqual(cc.Rpc("u", 1000, 1).batch([("m", []), ("m", [])]), ["0x1", "0x2"])
 
     def test_reverted_item_returns_none_without_retry(self):
         calls = []
 
-        def one_revert(url, body=None):
+        def one_revert(url, body=None, **kw):
             calls.append((url, body))
             return [{"id": 1, "result": "0x2"}, {"id": 0, "error": {"code": 3, "message": "execution reverted"}}]
 
@@ -124,7 +124,7 @@ class RpcCall(unittest.TestCase):
     def test_execution_reverted_is_not_retried(self):
         calls = []
 
-        def reverted(url, body=None):
+        def reverted(url, body=None, **kw):
             calls.append((url, body))
             return {"jsonrpc": "2.0", "id": 1, "error": {"code": 3, "message": "execution reverted"}}
 
@@ -136,7 +136,7 @@ class RpcCall(unittest.TestCase):
     def test_logs_range_limit_error_is_not_retried(self):
         calls = []
 
-        def limited(url, body=None):
+        def limited(url, body=None, **kw):
             calls.append((url, body))
             return {"jsonrpc": "2.0", "id": 1, "error": {"code": -32602, "message": "query spans 13223085 blocks; narrow the block range"}}
 
@@ -186,10 +186,10 @@ class NoArchive(unittest.TestCase):
             def eth_call(self, to, data):
                 return "0x12" if data == "0x313ce567" else hex(10**27)
 
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 return ["0x0"] * len(calls)
 
-            def call(self, method, params):
+            def call(self, method, params, deadline=None):
                 return "0x3556f6d"
 
             def block_ts(self, n):
@@ -237,7 +237,7 @@ class AgeGate(unittest.TestCase):
                     return "0x0"
                 raise AssertionError((to, data))
 
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 out = []
                 for m, p in calls:
                     if m == "eth_call":
@@ -246,7 +246,7 @@ class AgeGate(unittest.TestCase):
                         raise AssertionError((m, p))
                 return out
 
-            def call(self, method, params):
+            def call(self, method, params, deadline=None):
                 if method == "eth_blockNumber":
                     return hex(2_000_000)
                 raise AssertionError((method, params))
@@ -313,7 +313,7 @@ class MintMissingRugChecks(unittest.TestCase):
                     return "0x0"
                 raise AssertionError((to, data))
 
-            def call(self, method, params):
+            def call(self, method, params, deadline=None):
                 if method == "eth_blockNumber":
                     return hex(1_000_000)
                 raise AssertionError((method, params))
@@ -344,7 +344,7 @@ class MintMissingRugChecks(unittest.TestCase):
                     }], True
                 raise AssertionError((flt, frm, to, cap))
 
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 out = []
                 for m, p in calls:
                     if m == "eth_call":
@@ -377,7 +377,7 @@ class FirstFunders(unittest.TestCase):
         funded = {"0xa": 86643, "0xb": 87116}
 
         class FakeRpc:
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 out = []
                 for m, p in calls:
                     if m == "eth_getBalance":
@@ -403,7 +403,7 @@ class FirstFunders(unittest.TestCase):
         class FakeRpc:
             batch_size = 1
 
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 out = []
                 for m, p in calls:
                     if m == "eth_getBalance":
@@ -434,7 +434,7 @@ class FirstFunders(unittest.TestCase):
         class FakeRpc:
             batch_size = 1
 
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 out = []
                 for m, p in calls:
                     if m == "eth_getBalance":
@@ -580,7 +580,7 @@ class Solana(unittest.TestCase):
             buys[w] = (v, 100 + i * 12)  # spread over 3 minutes
         holds = {w: 0.0 for w in buys}
         out = sc.bundle_flags_with_holding(cc, 100, buys, 100.0, holds)
-        self.assertTrue(any("first 3 minutes of trading" in x and "40.0%" in x for x in out), out)
+        self.assertTrue(any("first 156 s of trading" in x and "40.0%" in x for x in out), out)
 
     def test_bundle_flags_likely_bundle_on_sol(self):
         import solana_check as sc
@@ -674,7 +674,7 @@ class SolanaPeaks(unittest.TestCase):
     def test_three_minute_flag_uses_peak_held_not_resold_sum(self):
         buys = {"a": (60.0, 10), "b": (60.0, 20)}  # 120% by sum after resales; at most 40% held at once
         self.assertEqual(cc.bundle_groups(0, buys, 100.0, held=40.0)[0]["text"],
-                         "2 wallets took 40.0% of supply in the first 3 minutes of trading.")
+                         "2 wallets took 40.0% of supply in the first 20 s of trading.")
 
 
 class SolanaFixtures(unittest.TestCase):
@@ -765,7 +765,7 @@ class Multisend(unittest.TestCase):
         funded = {"0xa": 500, "0xb": 500, "0xc": 500, "0xd": 700}
 
         class FakeRpc:
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 out = []
                 for m, p in calls:
                     if m == "eth_getBalance":
@@ -829,7 +829,7 @@ class LiquidityPulls(unittest.TestCase):
                     return "0x" + hex(32)[2:].zfill(64) + hex(4)[2:].zfill(64) + b"WETH".hex().ljust(64, "0")
                 return hex(pool_weth)  # balanceOf(pool)
 
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 return [{"from": (senders or {}).get(c[1][0], t.LP_REMOVER)} for c in calls]
 
             def block_ts(self, n):
@@ -875,7 +875,7 @@ class LiquidityPulls(unittest.TestCase):
         out = cc.liquidity_pulls(self.fake(logs, 736889873114803), {self.POOL}, self.TOKEN, self.LP_REMOVER, 0, 0x3557c00, listed_open)
         self.assertEqual(len(out), 1)
         self.assertNotRegex(out[0], r"-\d+(\.\d+)? ?(s|min|h)\b")
-        self.assertIn("at 2026-", out[0])
+        self.assertIn("time unknown after the first pool opened", out[0])
 
     def test_small_removal_after_another_wallet_emptied_the_pool_is_not_a_pull(self):
         big, small = "0x" + "a1" * 32, "0x" + "b2" * 32
@@ -974,7 +974,7 @@ class LpControl(unittest.TestCase):
                     raise AssertionError((topics, frm, to, cap))
                 return [x for x in source if x["address"] in addrs], True
 
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 out = []
                 for method, params in calls:
                     if method == "eth_getCode":
@@ -1097,7 +1097,7 @@ class LpControl(unittest.TestCase):
         w3 = "0x3333333333333333333333333333333333333333"
 
         class FakeRpc:
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 return ["0x"] * len(calls)
 
         flags, _ = cc.lp_findings(FakeRpc(), self.POOL, self.CREATOR, {w1: 34, w2: 33, w3: 33}, 100, 0.0, "v2")
@@ -1114,7 +1114,7 @@ class DustPools(unittest.TestCase):
         saved = cc.lp_control, cc.liquidity_pulls, cc.lp_control_v4, cc.gt_holders, cc.v4_manager
 
         class FakeRpc:
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 return []
 
         def lp_control(rpc, pools, creator, frm, to):
@@ -1152,7 +1152,7 @@ class DustPools(unittest.TestCase):
         saved = cc.lp_control, cc.liquidity_pulls, cc.lp_control_v4, cc.gt_holders, cc.v4_manager
 
         class FakeRpc:
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 return []
 
         def lp_control(rpc, pools, creator, frm, to):
@@ -1200,7 +1200,7 @@ class BundleTiming(unittest.TestCase):
             buys[w] = (pct, 100.0 + i * 12.0)
         flags = cc.bundle_flags(100.0, buys, 100.0)
         self.assertFalse(any("Likely bundle" in f for f in flags), flags)
-        self.assertTrue(any("first 3 minutes" in f and "35.0%" in f for f in flags), flags)
+        self.assertTrue(any("first 108 s of trading" in f and "35.0%" in f for f in flags), flags)
 
     def test_small_early_buyers_have_no_timing_flag(self):
         buys = {"0x" + "1" * 40: (2.0, 101.0), "0x" + "2" * 40: (3.0, 102.0), "0x" + "3" * 40: (4.0, 103.0)}
@@ -1221,7 +1221,7 @@ class BundleTiming(unittest.TestCase):
         saved = cc.lp_control, cc.lp_control_v4, cc.liquidity_pulls, cc.gt_holders, cc.v4_manager
 
         class FakeRpc:
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 return ["0x0"] * len(calls)
 
         cc.lp_control = lambda *a, **k: ([], [])
@@ -1250,7 +1250,7 @@ class BundleTiming(unittest.TestCase):
             logs.append({"topics": [cc.TRANSFER, "0x" + "0" * 24 + w[2:], "0x" + "0" * 24 + recv[2:]], "data": hex(4)})
 
         class FakeRpc:
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 return ["0x"] * len(calls)
 
         note = cc.wallet_flow_note(FakeRpc(), "0x" + "ab" * 20, ws, 100.0, 1, True, logs, cc.replay(logs), set())
@@ -1285,7 +1285,7 @@ class HolderKinds(unittest.TestCase):
                     return token_logs, True
                 raise AssertionError((flt, frm, to, cap))
 
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 out = []
                 for m, p in calls:
                     if m == "eth_getCode":
@@ -1386,7 +1386,7 @@ class V4Pools(unittest.TestCase):
                     return manager_logs, True
                 raise AssertionError((flt, frm, to, cap))
 
-            def batch(self, calls):
+            def batch(self, calls, deadline=None):
                 out = []
                 for method, params in calls:
                     if method == "eth_getTransactionReceipt":
@@ -1618,7 +1618,7 @@ class MarketData(unittest.TestCase):
 
     def market(self, pairs):
         saved = cc.http_json
-        cc.http_json = lambda url, body=None, tries=7: {"pairs": pairs}
+        cc.http_json = lambda url, body=None, tries=7, **kw: {"pairs": pairs}
         try:
             return cc.market(self.TOKEN, "base")[1]
         finally:
@@ -1647,13 +1647,45 @@ class MarketData(unittest.TestCase):
     def test_solana_pool_addresses_keep_their_case(self):
         mint, pool = "DDmGnuvroxVrb7CSyjYcezFU8gnAfhKasg4ZZezmpump", "CJyaPwhfcRHL57Nrmr4yTV2egpWoGx9ZeKQjScDfi3Hd"
         saved = cc.http_json
-        cc.http_json = lambda url, body=None, tries=7: {"pairs": [{
+        cc.http_json = lambda url, body=None, tries=7, **kw: {"pairs": [{
             "chainId": "solana", "pairAddress": pool, "baseToken": {"address": mint, "symbol": "T"}, "priceUsd": "1"}]}
         try:
             m = cc.market(mint, "solana")[1]
         finally:
             cc.http_json = saved
         self.assertEqual(m["pairs_any"], [pool])
+
+
+class HolderPatternHookErrors(unittest.TestCase):
+    def test_finish_reports_allowed_holder_pattern_error_class(self):
+        saved = cc.holder_patterns.evm_holder_pattern_flags, cc.gt_holders
+
+        class FakeRpc:
+            pass
+
+        cc.holder_patterns.evm_holder_pattern_flags = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("rpc limit"))
+        cc.gt_holders = lambda chain, addr: None
+        try:
+            out = cc.finish({"address": "0x" + "ab" * 20, "chain": "base", "notes": [], "supply": {}, "market": {}},
+                            FakeRpc(), "0x" + "ab" * 20, 1, 1, 0, None, 1)
+        finally:
+            cc.holder_patterns.evm_holder_pattern_flags, cc.gt_holders = saved
+        self.assertTrue(any("RuntimeError" in c for c in out["cant_check"]), out["cant_check"])
+
+    def test_finish_does_not_swallow_unexpected_holder_pattern_error_type(self):
+        saved = cc.holder_patterns.evm_holder_pattern_flags, cc.gt_holders
+
+        class FakeRpc:
+            pass
+
+        cc.holder_patterns.evm_holder_pattern_flags = lambda *a, **k: (_ for _ in ()).throw(ValueError("bad"))
+        cc.gt_holders = lambda chain, addr: None
+        try:
+            with self.assertRaises(ValueError):
+                cc.finish({"address": "0x" + "ab" * 20, "chain": "base", "notes": [], "supply": {}, "market": {}},
+                          FakeRpc(), "0x" + "ab" * 20, 1, 1, 0, None, 1)
+        finally:
+            cc.holder_patterns.evm_holder_pattern_flags, cc.gt_holders = saved
 
 
 class ReportWording(unittest.TestCase):

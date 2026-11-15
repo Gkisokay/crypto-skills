@@ -1,0 +1,26 @@
+{
+  "name": "oz_renounced",
+  "chain": "base",
+  "token": "0x9999999999999999999999999999999999999999",
+  "total_supply_raw": "1000000000000000000000000",
+  "market": {
+    "pairs": [],
+    "pair_liquidity": {}
+  },
+  "code_by_address": {
+    "0x9999999999999999999999999999999999999999": "0x638da5cb5b600052"
+  },
+  "storage_by_address_slot": {},
+  "eth_call_by_to_selector": {
+    "0x9999999999999999999999999999999999999999|0x8da5cb5b": "0x0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "router_simulation": {
+    "router": "",
+    "get_amounts_out": [
+      0,
+      0
+    ],
+    "standard": "ok",
+    "supporting": "ok"
+  }
+}

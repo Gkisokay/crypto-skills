@@ -11,6 +11,7 @@ Stdlib only. Reports what it found and what it could not check; it never says a 
 import collections
 import http.client
 import json
+import math
 import os
 import random
 import re
@@ -21,6 +22,10 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
+import copycat
+import holder_patterns
+import snipers
+import verdict
 
 UA = {"User-Agent": "launch-check/0.1 (+https://github.com/Gkisokay/crypto-skills)", "Content-Type": "application/json"}
 EVM_ADDRESS = re.compile(r"0x[0-9a-fA-F]{40}")
@@ -65,13 +70,21 @@ MIN_POOL_USD = 1000
 BUNDLE_WINDOW_S = 5
 FUNDING_BUDGET_S = 60
 MONO = time.monotonic
+MAX_HUMAN_SPAN_S = 30 * 86400
 
 
-def http_json(url, body=None, tries=7):
+def http_json(url, body=None, tries=7, deadline=None):
     data = json.dumps(body).encode() if body is not None else None
     for i in range(tries):
+        if deadline is None:
+            timeout = 60
+        else:
+            left = deadline - MONO()
+            if left <= 0:
+                raise TimeoutError("RPC deadline reached")
+            timeout = max(min(left, 60), 0.05)
         try:
-            with urllib.request.urlopen(urllib.request.Request(url, data, UA), timeout=60) as r:
+            with urllib.request.urlopen(urllib.request.Request(url, data, UA), timeout=timeout) as r:
                 return json.load(r)
         # OSError covers URLError, timeouts (socket.timeout is not TimeoutError on Python 3.9), resets and TLS errors
         # raised while the body is read; HTTPException covers truncated replies
@@ -85,11 +98,22 @@ def http_json(url, body=None, tries=7):
             # publicnode answers 403, not 429, when it throttles
             if i == tries - 1 or (isinstance(e, urllib.error.HTTPError) and e.code not in (403, 429, 500, 502, 503, 504)):
                 raise
-            time.sleep(min(2 ** i, 30) * (0.5 + random.random()))  # jitter so parallel workers don't retry in step
+            wait = min(2 ** i, 30) * (0.5 + random.random())
+            if deadline is not None:
+                left = deadline - MONO()
+                if left <= 0:
+                    raise TimeoutError("RPC deadline reached")
+                wait = min(wait, left)
+            if wait > 0:
+                time.sleep(wait)  # jitter so parallel workers don't retry in step
 
 
 class Reverted(RuntimeError):
     """The contract call itself failed (not the RPC): don't retry it."""
+
+
+class PrunedState(RuntimeError):
+    """The RPC doesn't have historical state at that block."""
 
 
 class Rpc:
@@ -122,36 +146,59 @@ class Rpc:
         msg = msg.lower()
         return any(k in msg for k in ("max results", "more than", "too many results", "response size"))
 
-    def call(self, method, params):
+    @staticmethod
+    def _is_pruned_state(err):
+        msg = (err.get("message") if isinstance(err, dict) else str(err)) or ""
+        msg = msg.lower()
+        return any(k in msg for k in ("historical state", "missing trie node", "header not found", "state not available"))
+
+    @staticmethod
+    def _request(url, body, deadline=None):
+        return http_json(url, body, deadline=deadline)
+
+    @staticmethod
+    def _retry_sleep(i, deadline=None):
+        wait = min(2 ** i, 30) * (0.5 + random.random())
+        if deadline is not None:
+            left = deadline - MONO()
+            if left <= 0:
+                raise TimeoutError("RPC deadline reached")
+            wait = min(wait, left)
+        if wait > 0:
+            time.sleep(wait)
+
+    def call(self, method, params, deadline=None):
         for i in range(6):
             self._pace(1)
-            d = http_json(self.url, {"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
+            d = self._request(self.url, {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}, deadline=deadline)
             if "error" not in d:
                 return d["result"]
             err = d["error"]
             if self._is_revert(err):
                 raise Reverted(f"{method}: {err}")
+            if self._is_pruned_state(err):
+                raise PrunedState(f"{method}: {err}")
             msg = (err.get("message") if isinstance(err, dict) else str(err)) or ""
             if method == "eth_getLogs" and (self._is_logs_range_error(msg) or self._is_logs_max_results_error(msg)):
                 raise RuntimeError(f"{method}: {err}")
             if i == 5:
                 raise RuntimeError(f"{method}: {err}")
-            time.sleep(min(2 ** i, 30) * (0.5 + random.random()))
+            self._retry_sleep(i, deadline)
 
-    def _call_or_none(self, method, params):
+    def _call_or_none(self, method, params, deadline=None):
         try:
-            return self.call(method, params)
+            return self.call(method, params, deadline=deadline)
         except Reverted:
             return None  # same contract as a batch item: a reverted call reads as None
 
-    def _batch(self, part):
+    def _batch(self, part, deadline=None):
         body = [{"jsonrpc": "2.0", "id": j, "method": m, "params": p} for j, (m, p) in enumerate(part)]
         last = None
         for i in range(6):
             self._pace(len(part))
-            res = http_json(self.url, body)
+            res = self._request(self.url, body, deadline=deadline)
             if not isinstance(res, list):  # some RPCs don't take batches
-                return [self._call_or_none(m, p) for m, p in part]
+                return [self._call_or_none(m, p, deadline=deadline) for m, p in part]
             got = {}
             retry = False
             errs = []
@@ -165,6 +212,8 @@ class Rpc:
                 err = x["error"]
                 if self._is_revert(err):
                     got[idx] = None
+                elif self._is_pruned_state(err):
+                    raise PrunedState(f"{part[idx][0]}: {err}")
                 else:
                     retry = True
                     errs.append(err)
@@ -172,14 +221,14 @@ class Rpc:
                 return [got[j] for j in range(len(part))]
             last = errs or [x["error"] for x in res if "error" in x]
             # an item that errored (often a per-item rate limit) would otherwise read as an empty block
-            time.sleep(min(2 ** i, 30) * (0.5 + random.random()))
+            self._retry_sleep(i, deadline)
         raise RuntimeError(f"batch kept failing: {last[:1]}")
 
-    def batch(self, calls, size=None):
+    def batch(self, calls, size=None, deadline=None):
         size = size or self.batch_size
         parts = [calls[i:i + size] for i in range(0, len(calls), size)]
         with ThreadPoolExecutor(self.workers) as ex:
-            return [x for part in ex.map(self._batch, parts) for x in part]
+            return [x for part in ex.map(lambda p: self._batch(p, deadline=deadline), parts) for x in part]
 
     def _range(self, flt, a, b):
         try:
@@ -300,13 +349,17 @@ def bundle_groups(open_ts, buys, total, held=None):
                              f"in near-identical sizes (~{med:.1%} each)."}]
     took_all = held / total if held is not None else sum(sh for _, sh, _ in rows)
     if took_all >= 0.30:
+        span = max(ts for _, _, ts in rows) - open_ts
+        when = "3 minutes" if span >= 170 else f"{max(1, math.ceil(span))} s"
         return [{"wallets": [w for w, _, _ in rows],
-                 "text": f"{len(rows)} wallets took {took_all:.1%} of supply in the first 3 minutes of trading."}]
+                 "text": f"{len(rows)} wallets took {took_all:.1%} of supply in the first {when} of trading."}]
     return []
 
 
-def bundle_flags(open_ts, buys, total):
-    return [x["text"] for x in bundle_groups(open_ts, buys, total)]
+def bundle_flags(open_ts, buys, total, wallet_profiles=None):
+    groups = bundle_groups(open_ts, buys, total)
+    groups = snipers.relabel_bundle_groups(groups, open_ts, buys, total, wallet_profiles or {})
+    return [x["text"] for x in groups]
 
 
 def wallet_flow_note(rpc, token, wallets, total, unit, complete, logs, replay_bal, pools):
@@ -365,9 +418,8 @@ def removal_time(rpc, last, first_add, start_ts):
         gap, since = ts - rpc.block_ts(first_add), "after liquidity was first added to that pool"
     else:
         gap, since = ts - start_ts, "after the first pool opened"
-    if gap < 0:  # the removal predates every opening time we have: give the time itself rather than a negative span
-        return time.strftime("at %Y-%m-%d %H:%M:%SZ", time.gmtime(ts))
-    return f"{human_span(gap)} {since}"
+    span = human_span(gap)
+    return f"{span} {since}" if span != "time unknown" else f"time unknown {since}"
 
 
 def liquidity_pulls(rpc, pools, token, creator, frm, to, start_ts):
@@ -810,10 +862,22 @@ def gt_holders(chain, addr):
 def check(addr, chain=None):
     if not addr.startswith("0x"):  # Solana addresses are base58 and case-sensitive
         chain, m = market(addr, "solana")
+        if m:
+            cflag, ccant = copycat.find_copycat_flag(addr, "solana", m, http_json)
+            if cflag:
+                m["copycat_flag"] = cflag
+            if ccant:
+                m["copycat_cant_check"] = ccant
         import solana_check
         return solana_check.check_solana(sys.modules[__name__], addr, m)
     addr = addr.lower()
     chain, m = market(addr, chain)
+    if m:
+        cflag, ccant = copycat.find_copycat_flag(addr, chain, m, http_json)
+        if cflag:
+            m["copycat_flag"] = cflag
+        if ccant:
+            m["copycat_cant_check"] = ccant
     cfg = CHAINS[chain]
     url = os.environ.get("RPC_" + chain.upper()) or cfg["rpc"]
     if "publicnode.com" in url and os.environ.get("PUBLICNODE_TOKEN") and not os.environ.get("RPC_" + chain.upper()):
@@ -883,7 +947,8 @@ def check(addr, chain=None):
     t0_ts = rpc.block_ts(t0)
     ref = min(t0 + 1000, head)  # block time around the launch, not today's: Elysium went from ~0.32s to ~0.11s at mainnet
     bt = (rpc.block_ts(ref) - t0_ts) / (ref - t0) if ref > t0 else bt
-    creator = rpc.call("eth_getTransactionByHash", [mint["transactionHash"]])["from"].lower()
+    mint_tx = rpc.call("eth_getTransactionByHash", [mint["transactionHash"]])
+    creator = mint_tx["from"].lower()
     r["launch"] = {"block": t0, "ts": t0_ts, "creator": creator, "block_time_s": round(bt, 3)}
     r["creator"] = creator
 
@@ -935,6 +1000,8 @@ def check(addr, chain=None):
             ts = {b: int((g or {}).get("timestamp", "0x0"), 16) for b, g in zip(blocks, got)}
         buys = {a: (recv[a], ts.get(first_block[a], open_ts)) for a in people if a in first_block}
         r["bundles"] = bundle_groups(open_ts, buys, total, peak_held)
+        profiles = snipers.evm_wallet_profiles(rpc, list(buys))
+        r["bundles"] = snipers.relabel_bundle_groups(r["bundles"], open_ts, buys, total, profiles, held=peak_held)
 
     sends, unresolved = first_funders(rpc, sorted(people), start, min(start + win, head), bt, r)
     if unresolved:
@@ -971,7 +1038,13 @@ def check(addr, chain=None):
             continue  # dust: wallets that got crumbs in the window, not buyers
         r["clusters"].append({"funder": f, "wallets": ws, "bought_share": bought,
                               "held_share": sum(held_all.get(w, 0) for w in ws) / total})
-    return finish(r, rpc, addr, unit, total, burned, t0, head, holder_logs, too_many=holder_logs is None)
+    import creator as creator_checks
+    creator_cant = creator_checks.add_evm_creator_checks(
+        sys.modules[__name__], rpc, r, addr, mint["transactionHash"], t0, t0_ts, head, unit, total, holder_logs
+    )
+    out = finish(r, rpc, addr, unit, total, burned, t0, head, holder_logs, too_many=holder_logs is None)
+    out["cant_check"] += [x for x in creator_cant if x not in out["cant_check"]]
+    return out
 
 
 def first_buy_block(logs, creator, token):
@@ -991,6 +1064,9 @@ def first_funders(rpc, wallets, t0, end, bt, r):
     scanning blocks in the FUNDING_LOOKBACK_S before the launch."""
     stop = MONO() + FUNDING_BUDGET_S
     timed_out = False
+    call_count = 0
+    balance_search_s = 0.0
+    block_scan_s = 0.0
 
     def out_of_time():
         return MONO() >= stop
@@ -999,27 +1075,80 @@ def first_funders(rpc, wallets, t0, end, bt, r):
         r.setdefault("notes", []).append(f"Funding lookups stopped after {FUNDING_BUDGET_S} s (slow RPC); {traced} of {len(wallets)} early buyers traced. "
                                          "A faster RPC (RPC_<CHAIN>) traces the rest.")
 
+    def set_timing():
+        r.setdefault("launch", {})["funding_timing"] = {"balance_search_s": round(balance_search_s, 3),
+                                                        "block_scan_s": round(block_scan_s, 3),
+                                                        "calls": call_count}
+
+    def batch_with_retry(reqs):
+        """Keep binary search on the fast path if one large batch fails transiently."""
+        nonlocal call_count
+
+        def batch_once(part):
+            nonlocal call_count
+            call_count += 1
+            return rpc.batch(part, deadline=stop)
+
+        try:
+            return batch_once(reqs)
+        except PrunedState:
+            raise
+        except TimeoutError:
+            raise
+        except RuntimeError:
+            if len(reqs) <= 1:
+                raise
+            out = []
+            step = max((getattr(rpc, "batch_size", 20) or 20) // 2, 1)
+            for i in range(0, len(reqs), step):
+                part = reqs[i:i + step]
+                try:
+                    out += batch_once(part)
+                except PrunedState:
+                    raise
+                except TimeoutError:
+                    raise
+                except RuntimeError:
+                    if not hasattr(rpc, "call"):
+                        raise
+                    for method, params in part:
+                        call_count += 1
+                        out.append(rpc.call(method, params, deadline=stop))
+            return out
+
     lo0 = max(t0 - int(FUNDING_LOOKBACK_DAYS * 86400 / bt), 1)
     lo = {w: lo0 for w in wallets}
     hi = {w: end for w in wallets}  # buyers still hold gas money at the end of the launch window
     found = None
-    try:
-        while any(lo[w] < hi[w] for w in wallets):
-            if out_of_time():
-                timed_out = True
-                break
-            todo = [w for w in wallets if lo[w] < hi[w]]
-            mids = {w: (lo[w] + hi[w]) // 2 for w in todo}
-            res = rpc.batch([("eth_getBalance", [w, hex(mids[w])]) for w in todo])
-            for w, x in zip(todo, res):
-                if int(x, 16) > 0:
-                    hi[w] = mids[w]
-                else:
-                    lo[w] = mids[w] + 1
-        found = {w: lo[w] for w in wallets if lo[w] == hi[w]}
-        r["launch"]["funding_method"] = f"first-funded block per wallet, up to {FUNDING_LOOKBACK_DAYS} days back"
-    except RuntimeError:  # pruned state: scan the blocks just before launch instead
-        found = None
+    if not getattr(rpc, "_funding_balance_pruned", False):
+        bal_started = MONO()
+        try:
+            try:
+                while any(lo[w] < hi[w] for w in wallets):
+                    if out_of_time():
+                        timed_out = True
+                        break
+                    todo = [w for w in wallets if lo[w] < hi[w]]
+                    mids = {w: (lo[w] + hi[w]) // 2 for w in todo}
+                    try:
+                        res = batch_with_retry([("eth_getBalance", [w, hex(mids[w])]) for w in todo])
+                    except TimeoutError:
+                        timed_out = True
+                        break
+                    for w, x in zip(todo, res):
+                        if int(x, 16) > 0:
+                            hi[w] = mids[w]
+                        else:
+                            lo[w] = mids[w] + 1
+                found = {w: lo[w] for w in wallets if lo[w] == hi[w]}
+                r["launch"]["funding_method"] = f"first-funded block per wallet, up to {FUNDING_LOOKBACK_DAYS} days back"
+            except PrunedState:  # no archive state at old blocks: switch to block scans for this RPC
+                rpc._funding_balance_pruned = True
+                found = None
+            except RuntimeError:
+                found = None
+        finally:
+            balance_search_s += max(MONO() - bal_started, 0.0)
     sends, unresolved, traced = [], 0, set()
     why = r["launch"].setdefault("funding_unresolved", collections.Counter())
     if found:
@@ -1031,7 +1160,11 @@ def first_funders(rpc, wallets, t0, end, bt, r):
                 timed_out = True
                 break
             part = blocks[i:i + step]
-            got = rpc.batch([("eth_getBlockByNumber", [hex(b), True]) for b in part])
+            try:
+                got = batch_with_retry([("eth_getBlockByNumber", [hex(b), True]) for b in part])
+            except TimeoutError:
+                timed_out = True
+                break
             txs.update(zip(part, got))
         by_block = collections.defaultdict(list)
         for w, b in found.items():
@@ -1057,25 +1190,37 @@ def first_funders(rpc, wallets, t0, end, bt, r):
         unresolved += len(set(wallets) - set(found))
         if timed_out:
             timeout_note(len(traced))
+        set_timing()
         return sends, unresolved
     pre = int(FUNDING_LOOKBACK_S / bt)
     span = list(range(max(t0 - pre, 0), t0 + 1))[-MAX_FUND_BLOCKS:]
     r["launch"]["funding_method"] = f"block scan of the {len(span)} blocks (~{len(span) * bt / 60:.0f} min) before launch"
     seen = set()
+    wallet_set = set(wallets)
     step = max(getattr(rpc, "batch_size", 20) or 20, 1)
-    for i in range(0, len(span), step):
-        if out_of_time():
-            timed_out = True
-            break
-        part = span[i:i + step]
-        for blk in rpc.batch([("eth_getBlockByNumber", [hex(n), True]) for n in part]):
-            for tx in (blk or {}).get("transactions", []):
-                to = (tx.get("to") or "").lower()
-                if to in lo and int(tx["value"], 16) > 0:
-                    sends.append((tx["from"].lower(), to))
-                    seen.add(to)
+    scan_started = MONO()
+    try:
+        for i in range(0, len(span), step):
+            if out_of_time():
+                timed_out = True
+                break
+            part = span[i:i + step]
+            try:
+                got = batch_with_retry([("eth_getBlockByNumber", [hex(n), True]) for n in part])
+            except TimeoutError:
+                timed_out = True
+                break
+            for blk in got:
+                for tx in (blk or {}).get("transactions", []):
+                    to = (tx.get("to") or "").lower()
+                    if to in wallet_set and int(tx["value"], 16) > 0:
+                        sends.append((tx["from"].lower(), to))
+                        seen.add(to)
+    finally:
+        block_scan_s += max(MONO() - scan_started, 0.0)
     if timed_out:
         timeout_note(len(seen))
+    set_timing()
     return sends, len(set(wallets) - seen)
 
 
@@ -1148,12 +1293,36 @@ def finish(r, rpc, addr, unit, total, burned, t0, head, logs=None, rug_from=None
         r.setdefault("extra_flags", []).extend(v4_flags)
         r["notes"].extend(v4_notes)
         r.setdefault("extra_flags", []).extend(liquidity_pulls(rpc, pools_all, addr, creator, scan_from, head, start))
+    extra_cant = []
+    try:
+        hp_flags, hp_cant = holder_patterns.evm_holder_pattern_flags(
+            rpc, addr, total, unit, m, logs if complete else None, replay_bal, pools_all, (r.get("launch") or {}).get("block_time_s")
+        )
+        r.setdefault("extra_flags", []).extend(hp_flags)
+        extra_cant.extend(hp_cant)
+    except (RuntimeError, OSError, urllib.error.HTTPError, urllib.error.URLError) as e:
+        extra_cant.append("Wallet-farm and fake-volume checks couldn't complete on this RPC "
+                          f"({type(e).__name__}); set PUBLICNODE_TOKEN (free at allnodes.com/publicnode).")
+    if m.get("copycat_flag"):
+        r.setdefault("extra_flags", []).append(m["copycat_flag"])
+    if m.get("copycat_cant_check"):
+        extra_cant.append(m["copycat_cant_check"])
+    contract_traps_cant = []
+    try:
+        import contract_traps
+        traps = contract_traps.check_contract_traps(rpc, addr, r.get("chain"), m, int(total * unit))
+        r.setdefault("extra_flags", []).extend(traps.get("flags") or [])
+        contract_traps_cant = traps.get("cant_check") or []
+    except RuntimeError as e:
+        contract_traps_cant = [f"Contract trap checks couldn't finish: {e}"]
     r["flags"] = flags(r)
+    r["flag_codes"] = verdict.flag_codes(r["flags"])
+    r["verdict"] = verdict.main_verdict(r["flags"], launch_checks_ran=bool(r.get("launch")))
     r["cant_check"] = [
         "Funding sent as tokens (USDC/USDT) rather than the native coin.",
         "Funding through a bridge or an exchange withdrawal (the funder then looks like a busy wallet and is skipped).",
         "Who controls the creator wallet, or whether its tokens are promised to an airdrop or vesting.",
-        "Contract risks (mint, blacklist, tax, upgradeable proxy); check the contract separately.",
+        "Contract functions found only by name (a renamed mint or blacklist function is missed); sell simulation needs a v2-style pool.",
         "LP control and liquidity pulls cover Uniswap v2/v3/v4-style pools; Aerodrome and other non-Uniswap designs are not covered yet.",
         "Pools DexScreener doesn't list. Pool addresses, pool age and liquidity figures come from DexScreener, not from the chain.",
         "On v3/v4 pools, shares are of liquidity units; positions in different price ranges aren't directly comparable.",
@@ -1161,11 +1330,17 @@ def finish(r, rpc, addr, unit, total, burned, t0, head, logs=None, rug_from=None
         "one isn't counted among early buyers, funders or 'person' holders. 'person' means a plain wallet, which can also be a bot or an exchange.",
         "'Creator' means the wallet that sent the transaction that first minted the token. On launchpads that can be the "
         "launchpad's own wallet, not the person behind the coin.",
-    ]
+    ] + extra_cant + contract_traps_cant
     return r
 
 
 def human_span(seconds):
+    try:
+        seconds = float(seconds)
+    except (TypeError, ValueError):
+        return "time unknown"
+    if not math.isfinite(seconds) or seconds < 0 or seconds > MAX_HUMAN_SPAN_S:
+        return "time unknown"
     return f"{seconds:.0f} s" if seconds < 120 else f"{seconds / 60:.0f} min" if seconds < 7200 else f"{seconds / 3600:.1f}h"
 
 
@@ -1173,6 +1348,7 @@ def fmt(r):
     m = r.get("market") or {}
     s = r["supply"]
     lines = [f"Launch check: {r['symbol']} on {r['chain']} · {r['address']}"]
+    lines.append(r.get("verdict") or verdict.main_verdict(r.get("flags", []), launch_checks_ran=bool(r.get("launch"))))
     if m:
         liq = "unknown (DexScreener gives no figure)" if m.get("liquidity") is None else f"${m['liquidity']:,.0f}"
         lines.append(f"Price ${m['price']:.8g} · liquidity {liq} · DexScreener FDV ${m['dex_fdv'] or 0:,.0f}"
@@ -1185,11 +1361,10 @@ def fmt(r):
         if L.get("first_buy_ts"):
             lines.append(f"Trading opened {time.strftime('%Y-%m-%d %H:%M:%SZ', time.gmtime(L['first_buy_ts']))} "
                          f"(block {L['first_buy_block']}), {human_span(L['first_buy_ts'] - L['ts'])} after the mint")
-        lines.append(f"First {L.get('window_s', LAUNCH_WINDOW_S)}s of trading: {L['early_buyers']} wallets took {L['early_bought_share']:.1%} of supply")
+        if L.get("early_buyers") is not None and L.get("early_bought_share") is not None:
+            lines.append(f"First {L.get('window_s', LAUNCH_WINDOW_S)}s of trading: {L['early_buyers']} wallets took {L['early_bought_share']:.1%} of supply")
     lines.append("")
-    lines.append("Red flags:" if r["flags"] else
-                 "Red flags: none found by these checks (that is not the same as safe)." if L else
-                 "Red flags: none found, but the launch checks didn't run (see the note below), so this says little.")
+    lines.append("Red flags:" if r["flags"] else "Red flags: none (see the verdict above).")
     lines += [f"- {f}" for f in r["flags"]]
     h = r["holders"]
     if h.get("top"):

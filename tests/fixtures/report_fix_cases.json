@@ -1,0 +1,19 @@
+{
+  "span_seconds": {
+    "valid_short": 90,
+    "valid_long": 3900,
+    "negative": -50,
+    "absurd_large": 999999999999
+  },
+  "launch_row": {
+    "block": 123,
+    "ts": 1700000000,
+    "creator": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "first_buy_block": 125,
+    "first_buy_ts": 1700003600
+  },
+  "flags": [
+    "Liquidity can be pulled: wallet 0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb (the creator) holds 100.0% of pool 0xcccccccccccccccccccccccccccccccccccccccc LP tokens in a plain wallet (not burned or locked).",
+    "Top 10 people (pools, burns, contracts excluded) hold 58.0%."
+  ]
+}

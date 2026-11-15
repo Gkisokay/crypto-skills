@@ -1,6 +1,6 @@
 ---
 name: launch-check
-description: Check a new token before buying it, by reading its on-chain history. Reports the creator wallet and how much it still holds, who bought in the first minutes and whether one wallet (or the creator) funded them, whether liquidity was removed from its pools (EVM chains), real FDV after burns vs what DexScreener shows, and the top holders labeled pool / burn / contract / person. Use when the user pastes a token contract address and asks "is this bundled", "is this a rug", "check this coin", "who's holding this", "insiders?", or wants a coin checked before a trade. Chains: Ethereum, Base, BNB Chain, Robinhood Chain, Elysium, HyperEVM, Solana (no liquidity checks on Solana).
+description: Check a new token before buying it, by reading its on-chain history. Opens with a one-line main risk, then reports the creator wallet (what it holds, when it sold, what else it launched), who bought in the first minutes (sniper bots vs a bundle, and whether one wallet funded them), wallet farms holding equal slices, whether liquidity was removed or can be, token and contract traps (honeypot, sell tax, owner mint, blacklist, pause; Solana mint/freeze authority and Token-2022 extensions), FDV far above liquidity, copycat tickers, real FDV after burns vs DexScreener, and the top holders labeled pool / burn / contract / person. Use when the user pastes a token contract address and asks "is this bundled", "is this a rug", "check this coin", "who's holding this", "insiders?", or wants a coin checked before a trade. Chains: Ethereum, Base, BNB Chain, Robinhood Chain, Elysium, HyperEVM, Solana.
 ---
 
 # Launch check
@@ -25,6 +25,7 @@ Use the full address (copycat tokens share names and tickers):
 python3 <this skill's folder>/launch_check.py <address>            # chain auto-detected from DexScreener
 python3 <this skill's folder>/launch_check.py <address> --chain base
 python3 <this skill's folder>/launch_check.py <address> --json      # full data, for follow-up questions
+python3 -m unittest discover -s tests -q                            # from repo root, runs all tests
 ```
 
 It takes a few seconds on Base and from one to several minutes on other chains or busy tokens. Tell the user it's
@@ -40,7 +41,7 @@ DexScreener yet, ask the user which chain it is on and pass `--chain`.
 
 ## How to report it
 
-1. Lead with the red flags, in plain words, each with its number.
+1. Lead with the "Main risk:" line (line 2 of the report), then the red flags, in plain words, each with its number.
 2. Then the facts behind them: creator wallet and its share, the launch-window buyers, any funder cluster and what
    those wallets hold now, real vs DexScreener FDV, top holders (people only when you talk about concentration;
    pools, burns and contracts aren't people).
@@ -81,8 +82,20 @@ DexScreener yet, ask the user which chain it is on and pass `--chain`.
   peak liquidity units rather than token amounts.
 - **DexScreener FDV vs real FDV:** a big gap usually means the two are counting different supplies, most often burned
   supply still being counted.
-- **Solana:** there are no liquidity checks on Solana. Do not say or imply that liquidity is locked, burned, safe or
-  untouched for a Solana coin; say it wasn't checked.
+- **Sniper bots vs a bundle:** early buyers with 1,000+ past transactions are sniper bots (they buy every launch and
+  sell fast); fresh or linked wallets buying together are a likely bundle. Say which one the report says.
+- **Wallet farm:** 20+ plain wallets holding near-equal slices of the supply, usually made for this coin. The report
+  samples who funded them one step back; a shared funder makes it stronger.
+- **Creator exit and history:** when the creator wallet sold or moved its tokens after launch (seconds after is the
+  pattern to lead with), and how many other coins it launched and where they are now. History stops at a time budget,
+  so a serial launcher shows "at least" a number.
+- **Contract traps (EVM):** a simulated sell that reverts (honeypot) or loses a measured share (sell tax), and owner
+  functions that can mint, blacklist or pause. Lead with a failed sell. **Token traps (Solana):** mint or freeze
+  authority still set, and Token-2022 extensions that can block transfers or take fees.
+- **FDV far above liquidity:** a market cap the pool can't support; selling even a small share moves the price a lot.
+- **Copycat name:** the same ticker or name as a bigger, older coin, often on another chain. Give both full addresses.
+- **Solana liquidity:** pulls from PumpSwap, Meteora and Raydium CPMM pools are checked; who controls Solana pool
+  liquidity isn't. Do not say or imply that Solana liquidity is locked or safe; say control wasn't checked.
 - **"Liquidity unknown" or "DexScreener lists no pools":** the liquidity figure or the liquidity checks are missing
   for this run. Say so; an empty red-flag list then says little about liquidity.
 
@@ -98,7 +111,7 @@ What works with no keys, what needs a free key, and what we've actually tested:
 | Elysium | ⚠️ Kinetiq's official public RPC works but is slow (1–2 min) and funder tracing runs out of time | Conduit API key (free tier at app.conduit.xyz, not tested yet) |
 | Ethereum | ❌ publicnode doesn't serve the history without a token; the report says the launch checks didn't run | ✅ PublicNode token, tested Nov 10 2026, ~15 s |
 | HyperEVM | not tested without a key (Hyperliquid's own RPC rate-limits too hard) | ✅ PublicNode token, tested Nov 10 2026, ~35 s |
-| Solana | ❌ public RPC rate-limits | ✅ Helius free key, tested Nov 10 2026, reaches launch on busy coins. No liquidity checks on Solana |
+| Solana | ❌ public RPC rate-limits | ✅ Helius free key, tested Nov 10 2026, reaches launch on busy coins. Liquidity pulls checked; pool control isn't |
 
 The two free keys we recommend (both tested with this skill):
 - **PublicNode personal token** (free at allnodes.com/publicnode): `export PUBLICNODE_TOKEN=...`. Covers Ethereum,

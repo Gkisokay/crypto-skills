@@ -1,0 +1,128 @@
+{
+  "creator": "DqHChnrHoFYGagN6oZgqbSd4wKr9aSbBA25gTfY1fffw",
+  "current_mint": "CurrentMint1111111111111111111111111111111111",
+  "launch_ts": 1794523200,
+  "pages": [
+    [
+      {
+        "blockTime": 1794609600,
+        "transaction": {
+          "message": {
+            "instructions": [
+              {
+                "programId": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+                "accounts": ["HighNow724k11111111111111111111111111111111", "BondCurve11111111111111111111111111111111111"]
+              }
+            ]
+          }
+        },
+        "meta": {
+          "preTokenBalances": [],
+          "postTokenBalances": [
+            {"mint": "HighNow724k11111111111111111111111111111111", "owner": "BondCurve11111111111111111111111111111111111", "uiTokenAmount": {"uiAmount": 1000000}}
+          ],
+          "innerInstructions": [
+            {"instructions": [{"parsed": {"type": "initializeMint2", "info": {"mint": "HighNow724k11111111111111111111111111111111"}}}]}
+          ]
+        }
+      },
+      {
+        "blockTime": 1794609500,
+        "transaction": {
+          "message": {
+            "instructions": [
+              {
+                "programId": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+                "accounts": ["LowFdvA11111111111111111111111111111111111", "BondCurveA111111111111111111111111111111111"]
+              }
+            ]
+          }
+        },
+        "meta": {
+          "preTokenBalances": [],
+          "postTokenBalances": [
+            {"mint": "LowFdvA11111111111111111111111111111111111", "owner": "BondCurveA111111111111111111111111111111111", "uiTokenAmount": {"uiAmount": 1000000}}
+          ],
+          "innerInstructions": [
+            {"instructions": [{"parsed": {"type": "initializeMint2", "info": {"mint": "LowFdvA11111111111111111111111111111111111"}}}]}
+          ]
+        }
+      },
+      {"createdMint": "LowFdvB11111111111111111111111111111111111", "blockTime": 1794609400},
+      {"createdMint": "LowFdvC11111111111111111111111111111111111", "blockTime": 1794609300},
+      {"createdMint": "LowFdvD11111111111111111111111111111111111", "blockTime": 1794609200},
+      {"createdMint": "LowFdvE11111111111111111111111111111111111", "blockTime": 1794609100},
+      {"createdMint": "LowFdvF11111111111111111111111111111111111", "blockTime": 1794609000},
+      {"createdMint": "LowFdvG11111111111111111111111111111111111", "blockTime": 1794608900},
+      {"createdMint": "LowFdvH11111111111111111111111111111111111", "blockTime": 1794608800},
+      {"createdMint": "LowFdvI11111111111111111111111111111111111", "blockTime": 1794608700},
+      {"createdMint": "LowFdvJ11111111111111111111111111111111111", "blockTime": 1794608600},
+      {
+        "blockTime": 1794523200,
+        "transaction": {
+          "message": {
+            "instructions": [
+              {
+                "programId": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+                "accounts": ["CurrentMint1111111111111111111111111111111111", "BondCurveCurrent11111111111111111111111111111"]
+              }
+            ]
+          }
+        },
+        "meta": {
+          "preTokenBalances": [],
+          "postTokenBalances": [
+            {"mint": "CurrentMint1111111111111111111111111111111111", "owner": "BondCurveCurrent11111111111111111111111111111", "uiTokenAmount": {"uiAmount": 1000000}}
+          ],
+          "innerInstructions": [
+            {"instructions": [{"parsed": {"type": "initializeMint2", "info": {"mint": "CurrentMint1111111111111111111111111111111111"}}}]}
+          ]
+        }
+      }
+    ],
+    [
+      {"createdMint": "LowFdvK11111111111111111111111111111111111", "blockTime": 1794523100},
+      {"createdMint": "LowFdvL11111111111111111111111111111111111", "blockTime": 1794523000},
+      {"createdMint": "LowFdvM11111111111111111111111111111111111", "blockTime": 1794522900},
+      {"createdMint": "LowFdvN11111111111111111111111111111111111", "blockTime": 1794522800},
+      {"createdMint": "LowFdvO11111111111111111111111111111111111", "blockTime": 1794522700},
+      {"createdMint": "LowFdvP11111111111111111111111111111111111", "blockTime": 1794522600},
+      {"createdMint": "LowFdvQ11111111111111111111111111111111111", "blockTime": 1794522500},
+      {"createdMint": "LowFdvR11111111111111111111111111111111111", "blockTime": 1794522400},
+      {"createdMint": "LowFdvS11111111111111111111111111111111111", "blockTime": 1794522300},
+      {
+        "blockTime": 1794522200,
+        "transaction": {
+          "message": {
+            "instructions": [
+              {
+                "programId": "OtherProgram11111111111111111111111111111111",
+                "accounts": ["Irrelevant1111111111111111111111111111111111"]
+              }
+            ]
+          }
+        },
+        "meta": {
+          "preTokenBalances": [],
+          "postTokenBalances": [
+            {"mint": "LowFdvT11111111111111111111111111111111111", "owner": "BondCurveT111111111111111111111111111111111", "uiTokenAmount": {"uiAmount": 1000000}}
+          ],
+          "innerInstructions": []
+        }
+      }
+    ]
+  ],
+  "dex_pairs": [
+    {"baseToken": {"address": "HighNow724k11111111111111111111111111111111"}, "fdv": 724000, "liquidity": {"usd": 40000}},
+    {"baseToken": {"address": "LowFdvA11111111111111111111111111111111111"}, "fdv": 2600, "liquidity": {"usd": 1200}},
+    {"baseToken": {"address": "LowFdvB11111111111111111111111111111111111"}, "fdv": 2400, "liquidity": {"usd": 800}},
+    {"baseToken": {"address": "LowFdvC11111111111111111111111111111111111"}, "fdv": 3100, "liquidity": {"usd": 900}},
+    {"baseToken": {"address": "LowFdvD11111111111111111111111111111111111"}, "fdv": 2800, "liquidity": {"usd": 700}},
+    {"baseToken": {"address": "LowFdvE11111111111111111111111111111111111"}, "fdv": 3500, "liquidity": {"usd": 1300}},
+    {"baseToken": {"address": "LowFdvF11111111111111111111111111111111111"}, "fdv": 2900, "liquidity": {"usd": 600}},
+    {"baseToken": {"address": "LowFdvG11111111111111111111111111111111111"}, "fdv": 3300, "liquidity": {"usd": 500}},
+    {"baseToken": {"address": "LowFdvH11111111111111111111111111111111111"}, "fdv": 2700, "liquidity": {"usd": 750}},
+    {"baseToken": {"address": "LowFdvI11111111111111111111111111111111111"}, "fdv": 3900, "liquidity": {"usd": 920}},
+    {"baseToken": {"address": "LowFdvJ11111111111111111111111111111111111"}, "fdv": 3400, "liquidity": {"usd": 610}}
+  ]
+}

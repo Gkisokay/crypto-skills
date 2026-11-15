@@ -13,7 +13,7 @@ class CliErrorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with mock.patch.object(CM, "run_cluster_map", side_effect=RuntimeError("Blockscout request failed: HTTP 429")):
                 with self.assertRaises(SystemExit) as ctx:
-                    CM.main([addr(5000), "--out", tmp, "--cache", os.path.join(tmp, "cache")])
+                    CM.main([addr(5000), "--chain", "robinhood", "--out", tmp, "--cache", os.path.join(tmp, "cache")])
         self.assertEqual(str(ctx.exception), "cluster-map: Blockscout request failed: HTTP 429")
 
     def run_record(self, path, out, save_error=None):
@@ -23,7 +23,7 @@ class CliErrorTests(unittest.TestCase):
                 patch = mock.patch.object(CM, "save_fixture", side_effect=save_error) if save_error else contextlib.nullcontext()
                 with patch:
                     with self.assertRaises(SystemExit) as ctx:
-                        CM.main([addr(5000), "--out", out, "--cache", os.path.join(out, "cache"), "--record", path])
+                        CM.main([addr(5000), "--chain", "robinhood", "--out", out, "--cache", os.path.join(out, "cache"), "--record", path])
         return str(ctx.exception), stdout.getvalue()
 
     def test_record_into_missing_folder_is_one_line_exit(self):
@@ -121,6 +121,17 @@ class FailingHistoryClient(FakeBlockscoutClient):
         if address == self.failing:
             raise RuntimeError("Blockscout request failed with HTTP 500: upstream")
         return super().get_history(address, action)
+
+
+class ChainFlagTests(unittest.TestCase):
+    def test_chain_is_required(self):
+        with mock.patch("sys.stderr", io.StringIO()) as err:
+            with self.assertRaises(SystemExit):
+                CM.parse_args([addr(5000)])
+        self.assertIn("--chain", err.getvalue())
+
+    def test_chain_given_parses(self):
+        self.assertEqual(CM.parse_args([addr(5000), "--chain", "base"]).chain, "base")
 
 
 class HistoryFailureTests(unittest.TestCase):

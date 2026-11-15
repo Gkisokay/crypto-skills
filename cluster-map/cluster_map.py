@@ -3479,7 +3479,7 @@ def parse_args(argv):
     parser.add_argument("--top", default=DEFAULT_TOP, type=int, help="Top holders to read")
     parser.add_argument("--cache", default=DEFAULT_CACHE_DIR, help="Cache directory")
     parser.add_argument("--json", action="store_true", help="Print short JSON summary to stdout")
-    parser.add_argument("--chain", default="robinhood", choices=sorted(CHAINS), help="Chain (default robinhood)")
+    parser.add_argument("--chain", required=True, choices=sorted(CHAINS), help="Chain the token is on")
     parser.add_argument("--record", default="", help="Save every API response (keys removed) to this .json.gz fixture")
     return parser.parse_args(argv)
 

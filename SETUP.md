@@ -28,7 +28,7 @@ You don't need all of them. Pick the chains you trade.
 
 | Key | Chains | Used by | Free limit | Get it |
 |---|---|---|---|---|
-| PublicNode personal token | Ethereum, Base, BNB Chain, HyperEVM | launch-check (older coins, Ethereum), cluster-map (Base) | free personal plan | [allnodes.com/publicnode](https://www.allnodes.com/publicnode) |
+| PublicNode personal token | Ethereum, Base, BNB Chain, HyperEVM | launch-check (older coins, Ethereum), cluster-map (Base) | free personal token | [allnodes.com/publicnode](https://www.allnodes.com/publicnode) |
 | Helius API key | Solana | launch-check, cluster-map | 1M credits a month, 10 requests a second | [helius.dev](https://www.helius.dev) |
 | Blockscout API key | Robinhood Chain | cluster-map | 100K credits a day, 5 requests a second | [dev.blockscout.com](https://dev.blockscout.com) |
 

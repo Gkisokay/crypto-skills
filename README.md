@@ -8,6 +8,9 @@ or the caller says. Pool addresses, prices and liquidity figures come from DexSc
 
 New skills go out by email first: **[sign up on Substack](https://substack.com/@gkisokay)** (free).
 
+**Start with [SETUP.md](SETUP.md):** the free keys, how to save and check them, and how to use your AI agent for any
+onchain question once they're set.
+
 ## Skills
 
 Each skill folder is self-contained (code + docs), so new skills can be added beside `launch-check/`.
@@ -15,6 +18,7 @@ Each skill folder is self-contained (code + docs), so new skills can be added be
 | Skill folder | What it does | Run from repo root | Tests |
 |---|---|---|---|
 | `launch-check/` | Checks a fresh token's launch: creator, early buyers/funders, bundle patterns, liquidity control/pulls (EVM), FDV mismatch, holders | `python3 launch-check/launch_check.py <address>` | `python3 -m unittest discover -s tests -q` |
+| `cluster-map/` | Which top holders are probably one person or team, and where their money went after launch (Base, Robinhood Chain, Solana) | `python3 cluster-map/cluster_map.py <address> --chain base` | same |
 
 ## launch-check
 
@@ -84,6 +88,22 @@ Free keys (2 minutes each):
 
 Keys are read from environment variables only. Don't paste a key into a chat with an AI agent; set it in your shell.
 
+## cluster-map
+
+Paste a token address and get the answer as plain text in your chat:
+
+- **One plain answer first**, for example "11 wallets that are probably one person or team hold 98.9% of the supply."
+- **Each cluster:** how many wallets, what they hold now and bought at launch, and one sentence on why they're linked
+  (funded by the same wallet, funded or bought within seconds of each other, or sent coins straight to each other).
+- **Where the money went after launch:** ETH or SOL followed for up to 3 hops, for example "17.74 ETH went back to
+  0x9bf4…2c11, the wallet that funded them."
+- **Every linked wallet in full**, and a "How this was read" list of exactly what was and wasn't read.
+
+It takes from about a minute to half an hour, depending on the chain and how many holders have long histories. Each
+chain needs one free key (Base: PublicNode, Robinhood Chain: Blockscout, Solana: Helius); see [SETUP.md](SETUP.md).
+A cluster means wallets are linked by these transactions. It can't prove one person controls them, and links routed
+through an exchange are invisible. Details and limits: [cluster-map/SKILL.md](cluster-map/SKILL.md).
+
 ## Install
 
 You need Python 3.9 or newer (`python3 --version`; on a Mac, the one installed with Apple's Command Line Tools works).
@@ -94,10 +114,10 @@ git clone https://github.com/Gkisokay/crypto-skills
 cd crypto-skills
 ```
 
-**Claude Code:** copy the skill into your skills folder, then just ask Claude to check a coin.
+**Claude Code:** copy the skills into your skills folder, then just ask Claude to check a coin.
 
 ```
-mkdir -p ~/.claude/skills && cp -R crypto-skills/launch-check ~/.claude/skills/
+mkdir -p ~/.claude/skills && cp -R launch-check cluster-map ~/.claude/skills/
 ```
 
 > check this coin <paste the full token address>
@@ -120,8 +140,9 @@ Always paste the full address. Copycat tokens share names and tickers.
 
 ## What leaves your machine
 
-launch-check has no server, no account and no analytics. Nothing is sent to the author. It reads no files and writes
-none (apart from Python's own `__pycache__` folder), and it reads keys only from the environment variables above.
+The skills have no server, no account and no analytics. Nothing is sent to the author. launch-check reads no files and
+writes none (apart from Python's own `__pycache__` folder). cluster-map caches the answers it gets in
+`~/.cache/cluster-map/` and writes nothing else unless you pass `--out`. Both read keys only from environment variables.
 
 It does make web requests, and each service below sees your IP address, like any website you visit:
 
@@ -131,13 +152,16 @@ It does make web requests, and each service below sees your IP address, like any
 | GeckoTerminal (`api.geckoterminal.com`) | the token address and its chain |
 | The chain's RPC endpoint: PublicNode (Ethereum, Base, BNB, HyperEVM), `rpc.mainnet.chain.robinhood.com`, `rpc.elysium.kinetiq.xyz`, `api.mainnet-beta.solana.com`, or Helius / whatever you set in `RPC_<CHAIN>` | the token address, its pool addresses, and the addresses of the creator, the first buyers, their funders and the top holders; your `PUBLICNODE_TOKEN` or `HELIUS_API_KEY` if you set one (to that provider only) |
 
+cluster-map sends the token address and the holder wallets it looks up to the chain's provider: PublicNode (Base),
+Blockscout (`api.blockscout.com`, Robinhood Chain) or Helius (Solana), with your key for that provider.
+
 Your own wallet address is not sent unless it is one of the wallets above. These services can see that your IP
 looked up a coin. If you run launch-check through an AI agent, the address and the report also go to that AI provider
 as part of your chat.
 
 ## Disclaimer
 
-launch-check is a free research tool from an individual, shared as-is under the MIT license. Please read this before you use it.
+These skills are free research tools from an individual, shared as-is under the MIT license. Please read this before you use it.
 
 - **Not advice.** Nothing here, and nothing the tool or an AI agent using it prints, is financial, investment, legal or
   tax advice, or a recommendation to buy, sell or hold anything.
@@ -155,8 +179,8 @@ launch-check is a free research tool from an individual, shared as-is under the 
   responsible for what that agent does in your sessions: the commands it runs, the keys it uses, the trades it makes
   and anything it posts or sends. This skill only reads public data. It never asks for a private key or seed phrase
   and never signs or sends a transaction; don't give an agent wallet keys in order to use it.
-- **Third-party services have their own rules.** The tool calls DexScreener, GeckoTerminal and public RPC endpoints
-  (PublicNode, Robinhood Chain, Kinetiq, Solana, and Helius or any endpoint you configure). Each has its own terms,
+- **Third-party services have their own rules.** The tools call DexScreener, GeckoTerminal, Blockscout and public RPC
+  endpoints (PublicNode, Robinhood Chain, Kinetiq, Solana, and Helius or any endpoint you configure). Each has its own terms,
   rate limits and privacy policy, which apply to you when you run it. They can change or stop working at any time.
 - **No affiliation.** This project is independent. It is not affiliated with, endorsed by or sponsored by any
   blockchain, exchange, DEX, launchpad, wallet, data provider or AI company named here. All names and trademarks

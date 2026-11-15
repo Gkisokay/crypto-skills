@@ -57,6 +57,20 @@ class NonJsonBodyTests(unittest.TestCase):
         self.assertNotIn("SECRETKEY123", message)
         self.assertNotIn("/path", message)
 
+    def test_token_in_the_url_path_is_not_echoed(self):
+        class Resp(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        body = b"no route for /PATHTOKEN1234567890"
+        with mock.patch.object(CM.urllib.request, "urlopen", return_value=Resp(body)):
+            with self.assertRaises(RuntimeError) as ctx:
+                CM.default_fetch_json("https://rpc.example.com/PATHTOKEN1234567890")
+        self.assertNotIn("PATHTOKEN1234567890", str(ctx.exception))
+
 
 class RpcSanitizeTests(unittest.TestCase):
     def make_client(self, tmp, fetch_json, batch_size=1):

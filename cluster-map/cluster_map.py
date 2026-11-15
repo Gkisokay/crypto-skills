@@ -318,9 +318,10 @@ def default_fetch_json(url, data=None, headers=None, timeout=HTTP_TIMEOUT_S):
     except ValueError:
         parts = urllib.parse.urlsplit(url)
         snippet = sanitize_error_text(body, "")
-        for _, value in urllib.parse.parse_qsl(parts.query):
-            if value:
-                snippet = snippet.replace(value, "[redacted]")
+        secrets = [v for _, v in urllib.parse.parse_qsl(parts.query) if v]
+        secrets += [s for s in parts.path.split("/") if len(s) >= 16]
+        for value in secrets:
+            snippet = snippet.replace(value, "[redacted]")
         raise RuntimeError(f"{parts.hostname} returned a non-JSON response: {snippet[:80]}")
 
 

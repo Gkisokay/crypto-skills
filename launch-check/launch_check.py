@@ -2,7 +2,9 @@
 """Launch check: who launched a token, who bought first, who funded them, and who holds it now.
 
 Usage:  python3 launch_check.py <token address> [--chain ethereum|base|bsc|robinhood|elysium|hyperevm] [--json] [--debug]
+                                               [--any-age]
         (Solana mints are detected by their address format)
+        --any-age runs the launch, creator, funder and holder checks on coins older than 7 days too (takes minutes)
 
 Public RPCs by default. PUBLICNODE_TOKEN (free, allnodes.com/publicnode) unlocks archive data on Ethereum, Base, BNB and HyperEVM;
 RPC_<CHAIN> (e.g. RPC_BASE) uses your own endpoint. Solana: HELIUS_API_KEY (free) or RPC_SOLANA.
@@ -144,7 +146,7 @@ class Rpc:
     @staticmethod
     def _is_logs_max_results_error(msg):
         msg = msg.lower()
-        return any(k in msg for k in ("max results", "more than", "too many results", "response size"))
+        return any(k in msg for k in ("max results", "more than", "too many results", "response size", "exceeds limit"))
 
     @staticmethod
     def _is_pruned_state(err):
@@ -230,9 +232,11 @@ class Rpc:
         with ThreadPoolExecutor(self.workers) as ex:
             return [x for part in ex.map(lambda p: self._batch(p, deadline=deadline), parts) for x in part]
 
-    def _range(self, flt, a, b):
+    def _range(self, flt, a, b, seen=None):
+        if seen and seen[0] > seen[1]:
+            return []  # past the caller's cap: logs() reports the scan as incomplete, so the rest isn't read
         try:
-            return self.call("eth_getLogs", [dict(flt, fromBlock=hex(a), toBlock=hex(b))])
+            got = self.call("eth_getLogs", [dict(flt, fromBlock=hex(a), toBlock=hex(b))])
         except RuntimeError as e:
             if b - a < 10:
                 raise
@@ -240,15 +244,19 @@ class Rpc:
             msg = str(e)
             if self._is_logs_range_error(msg):
                 self.chunk = min(self.chunk, max(mid - a + 1, 10))  # hard block-range caps should tune later spans
-            return self._range(flt, a, mid) + self._range(flt, mid + 1, b)
+            return self._range(flt, a, mid, seen) + self._range(flt, mid + 1, b, seen)
+        if seen:
+            seen[0] += len(got)
+        return got
 
     def logs(self, flt, frm, to, cap=None):
         """Logs from block frm to to, fetched in parallel waves; stops early once past cap."""
         spans = [(b, min(b + self.chunk - 1, to)) for b in range(frm, to + 1, self.chunk)]
         got = []
+        seen = [0, cap] if cap else None  # [logs read so far, cap]
         with ThreadPoolExecutor(self.workers) as ex:
             for i in range(0, len(spans), self.workers * 2):
-                for part in ex.map(lambda ab: self._range(flt, *ab), spans[i:i + self.workers * 2]):
+                for part in ex.map(lambda ab: self._range(flt, *ab, seen), spans[i:i + self.workers * 2]):
                     got += part
                 if cap and len(got) > cap:
                     return got, False
@@ -859,7 +867,7 @@ def gt_holders(chain, addr):
     return a.get("holders")
 
 
-def check(addr, chain=None):
+def check(addr, chain=None, any_age=False):
     if not addr.startswith("0x"):  # Solana addresses are base58 and case-sensitive
         chain, m = market(addr, "solana")
         if m:
@@ -903,13 +911,19 @@ def check(addr, chain=None):
     head = int(rpc.call("eth_blockNumber", []), 16)
     head_ts = rpc.block_ts(head)
     bt = (head_ts - rpc.block_ts(head - 1000)) / 1000 or 1.0
+    old = False
     if m and m.get("first_pair_ts"):
         age_s = head_ts - m["first_pair_ts"]
         if age_s > MAX_AGE_DAYS * 86400:
             age_d = int(age_s / 86400)
-            r["notes"].append(f"This coin is {age_d} days old. launch-check is built for new launches (first {MAX_AGE_DAYS} days), "
-                              "so the launch, bundle and liquidity checks were skipped.")
-            return finish(r, rpc, addr, unit, total, burned, None, head)
+            if not any_age:
+                r["notes"].append(f"This coin is {age_d} days old. launch-check is built for new launches (first {MAX_AGE_DAYS} days), "
+                                  "so the launch, bundle and liquidity checks were skipped.")
+                return finish(r, rpc, addr, unit, total, burned, None, head)
+            old = True
+            r["notes"].append(f"This coin is {age_d} days old. launch-check is built for new launches (first {MAX_AGE_DAYS} days); "
+                              "--any-age ran the launch, creator, funder and holder checks anyway. The liquidity checks (who "
+                              "controls it, whether it was pulled) were skipped: on an old coin they take many minutes.")
     out_of_history = False
     try:
         anchor = (rpc.block_at(m["first_pair_ts"], head, head_ts, bt)
@@ -1042,7 +1056,7 @@ def check(addr, chain=None):
     creator_cant = creator_checks.add_evm_creator_checks(
         sys.modules[__name__], rpc, r, addr, mint["transactionHash"], t0, t0_ts, head, unit, total, holder_logs
     )
-    out = finish(r, rpc, addr, unit, total, burned, t0, head, holder_logs, too_many=holder_logs is None)
+    out = finish(r, rpc, addr, unit, total, burned, t0, head, holder_logs, too_many=holder_logs is None, lp_history=not old)
     out["cant_check"] += [x for x in creator_cant if x not in out["cant_check"]]
     return out
 
@@ -1224,7 +1238,7 @@ def first_funders(rpc, wallets, t0, end, bt, r):
     return sends, len(set(wallets) - seen)
 
 
-def finish(r, rpc, addr, unit, total, burned, t0, head, logs=None, rug_from=None, too_many=False):
+def finish(r, rpc, addr, unit, total, burned, t0, head, logs=None, rug_from=None, too_many=False, lp_history=True):
     creator = r.get("creator")
     m = r.get("market") or {}
     pools_all = set(m.get("pairs") or [])
@@ -1283,7 +1297,7 @@ def finish(r, rpc, addr, unit, total, burned, t0, head, logs=None, rug_from=None
         c["flow_note"] = wallet_flow_note(rpc, addr, c["wallets"], total, unit,
                                           complete, logs, replay_bal, pool_targets)
         c["held_share"] = sum(max((replay_bal or {}).get(w, 0), 0) for w in c["wallets"]) / unit / total if complete and replay_bal else c.get("held_share", 0)
-    if scan_from is not None:
+    if scan_from is not None and lp_history:
         start = m.get("first_pair_ts") or (r.get("launch") or {}).get("ts") or 0
         lp_flags, lp_notes = lp_control(rpc, pools, creator, scan_from, head)
         r.setdefault("extra_flags", []).extend(lp_flags)
@@ -1442,7 +1456,7 @@ def run(argv):
     else:
         raise SystemExit(f"'{addr}' isn't a token address. Pass the contract address: 0x followed by 40 hex characters, "
                          "or a Solana mint address (32 to 44 base58 characters).")
-    r = check(addr, chain)
+    r = check(addr, chain, any_age="--any-age" in argv)
     print(json.dumps(r, indent=1) if "--json" in argv else fmt(r))
 
 

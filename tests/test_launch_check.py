@@ -274,6 +274,159 @@ class AgeGate(unittest.TestCase):
         self.assertIn("launch checks didn't run", cc.fmt(r))
 
 
+class AnyAge(unittest.TestCase):
+    """--any-age / check(any_age=True): a 16-day-old coin still gets its creator, clusters and labeled holders."""
+    TOKEN = "0x" + "ab" * 20
+    POOL = "0x" + "cd" * 20
+    MAKER = "0x" + "c1" * 20
+    FUNDER = "0x" + "f1" * 20
+    BUYERS = ["0x" + "a1" * 20, "0x" + "a2" * 20, "0x" + "a3" * 20]
+    HEAD = 2_000_000
+    MINT = HEAD - 16 * 86400 - 100
+
+    def setUp(self):
+        import contract_traps
+        import creator
+        import snipers
+        t = self
+        self._saved = [(cc, n, getattr(cc, n)) for n in ("Rpc", "market", "gt_holders", "first_funders", "lp_control",
+                                                          "lp_control_v4", "liquidity_pulls", "check")]
+        self._saved += [(creator, "add_evm_creator_checks", creator.add_evm_creator_checks),
+                        (snipers, "evm_wallet_profiles", snipers.evm_wallet_profiles),
+                        (cc.holder_patterns, "evm_holder_pattern_flags", cc.holder_patterns.evm_holder_pattern_flags),
+                        (contract_traps, "check_contract_traps", contract_traps.check_contract_traps)]
+        made = []
+
+        def log(frm, to, amt, block):
+            return {"blockNumber": hex(block), "transactionHash": "0x" + "7" * 64, "data": hex(amt),
+                    "topics": [cc.TRANSFER, "0x" + "0" * 24 + frm[2:], "0x" + "0" * 24 + to[2:]]}
+
+        transfers = [log(cc.ZERO, t.MAKER, 10**24, t.MINT), log(t.MAKER, t.POOL, 9 * 10**23, t.MINT)]
+        transfers += [log(t.POOL, b, 5 * 10**22, t.MINT + 10) for b in t.BUYERS]
+        balances = {t.MAKER: 10**23, t.POOL: 75 * 10**22, **{b: 5 * 10**22 for b in t.BUYERS}}
+
+        class FakeRpc:
+            url = "https://rpc.example"
+            chunk = 50000
+
+            def __init__(self, *a):
+                self.logs_calls = 0
+                made.append(self)
+
+            def eth_call(self, to, data):
+                if data == "0x313ce567":
+                    return "0x12"
+                if data == "0x18160ddd":
+                    return hex(10**24)
+                if data.startswith("0x70a08231"):
+                    return hex(balances.get("0x" + data[-40:], 0))
+                raise AssertionError((to, data))
+
+            def batch(self, calls, deadline=None):
+                out = []
+                for m, p in calls:
+                    if m == "eth_call":
+                        out.append(hex(balances.get("0x" + p[0]["data"][-40:], 0)))
+                    elif m == "eth_getCode":
+                        out.append("0x6080" if p[0] in (t.POOL, t.TOKEN) else "0x")
+                    elif m == "eth_getBlockByNumber":
+                        out.append({"timestamp": p[0]})
+                    elif m == "eth_getTransactionCount":
+                        out.append("0x5")
+                    else:
+                        raise AssertionError((m, p))
+                return out
+
+            def call(self, method, params, deadline=None):
+                if method == "eth_blockNumber":
+                    return hex(t.HEAD)
+                if method == "eth_getTransactionByHash":
+                    return {"from": t.MAKER}
+                raise AssertionError((method, params))
+
+            def block_ts(self, n):
+                return n
+
+            def block_at(self, ts, head, head_ts, bt):
+                return ts
+
+            def logs(self, flt, frm, to, cap=None):
+                self.logs_calls += 1
+                rows = [l for l in transfers if frm <= int(l["blockNumber"], 16) <= to
+                        and all(a == b for a, b in zip(flt["topics"], l["topics"]))]
+                return rows, True
+
+        cc.Rpc = FakeRpc
+        cc.market = lambda addr, chain: ("base", {"symbol": "OLD", "price": 1.0, "liquidity": 50000.0, "dex_fdv": 1e6,
+                                                   "first_pair_ts": t.HEAD - 16 * 86400, "pairs": [t.POOL],
+                                                   "pairs_any": [t.POOL], "pair_liquidity": {t.POOL: 50000.0}})
+        cc.gt_holders = lambda chain, addr: None
+        cc.first_funders = lambda rpc, wallets, t0, end, bt, r: ([(t.FUNDER, w) for w in wallets], 0)
+        self.lp_scans = []
+        cc.lp_control = lambda *a, **k: self.lp_scans.append("control") or ([], [])
+        cc.lp_control_v4 = lambda *a, **k: self.lp_scans.append("control v4") or ([], [])
+        cc.liquidity_pulls = lambda *a, **k: self.lp_scans.append("pulls") or []
+        creator.add_evm_creator_checks = lambda *a, **k: []
+        snipers.evm_wallet_profiles = lambda rpc, wallets: {}
+        cc.holder_patterns.evm_holder_pattern_flags = lambda *a, **k: ([], [])
+        contract_traps.check_contract_traps = lambda *a, **k: {}
+        self.made = made
+
+    def tearDown(self):
+        for mod, name, value in self._saved:
+            setattr(mod, name, value)
+
+    def test_default_still_skips_an_old_coin(self):
+        r = cc.check(self.TOKEN, "base")
+        self.assertEqual(self.made[0].logs_calls, 0)
+        self.assertNotIn("launch", r)
+        self.assertNotIn("clusters", r)
+        self.assertNotIn("top", r["holders"])
+        self.assertTrue(any("16 days old" in n and "first 7 days" in n for n in r["notes"]), r["notes"])
+
+    def test_any_age_finds_the_creator_and_their_share(self):
+        r = cc.check(self.TOKEN, "base", any_age=True)
+        self.assertEqual(r["creator"], self.MAKER)
+        self.assertAlmostEqual(r["creator_share"], 0.1)
+
+    def test_any_age_finds_funder_clusters(self):
+        r = cc.check(self.TOKEN, "base", any_age=True)
+        self.assertEqual([(c["funder"], sorted(c["wallets"])) for c in r["clusters"]], [(self.FUNDER, self.BUYERS)])
+        self.assertAlmostEqual(r["clusters"][0]["held_share"], 0.15)
+
+    def test_any_age_labels_the_holders(self):
+        r = cc.check(self.TOKEN, "base", any_age=True)
+        kinds = {h["address"]: h["kind"] for h in r["holders"]["top"]}
+        self.assertEqual(kinds, {self.POOL: "pool", self.MAKER: "creator", **{b: "person" for b in self.BUYERS}})
+
+    def test_any_age_report_says_the_age_and_what_ran(self):
+        r = cc.check(self.TOKEN, "base", any_age=True)
+        self.assertTrue(any("16 days old" in n and "any-age" in n for n in r["notes"]), r["notes"])
+        self.assertNotIn("launch checks didn't run", cc.fmt(r))
+
+    def test_any_age_leaves_the_liquidity_history_out_and_says_so(self):
+        r = cc.check(self.TOKEN, "base", any_age=True)
+        self.assertEqual(self.lp_scans, [])
+        self.assertTrue(any("liquidity checks" in n and "were skipped" in n for n in r["notes"]), r["notes"])
+
+    def test_any_age_changes_nothing_on_a_new_coin(self):
+        fresh = cc.market(self.TOKEN, "base")[1]
+        fresh["first_pair_ts"] = self.HEAD - 86400
+        cc.market = lambda addr, chain: ("base", fresh)
+        self.assertEqual(cc.check(self.TOKEN, "base", any_age=True), cc.check(self.TOKEN, "base"))
+        self.assertEqual(self.lp_scans, ["control", "control v4", "pulls"] * 2)
+
+    def test_flag_reaches_check(self):
+        import contextlib
+        import io
+        seen = []
+        cc.check = lambda addr, chain=None, any_age=False: seen.append((addr, chain, any_age)) or {"x": 1}
+        with contextlib.redirect_stdout(io.StringIO()):
+            cc.run([self.TOKEN, "--chain", "base", "--json", "--any-age"])
+            cc.run([self.TOKEN, "--json"])
+        self.assertEqual(seen, [(self.TOKEN, "base", True), (self.TOKEN, None, False)])
+
+
 class MintMissingRugChecks(unittest.TestCase):
     def test_rug_checks_run_when_mint_missing_but_pool_block_known(self):
         token = "0x" + "ab" * 20
@@ -491,6 +644,48 @@ class LogRanges(unittest.TestCase):
         self.assertTrue(complete)
         self.assertEqual(r.chunk, 1000)
         self.assertIn((2000, 2999), calls)  # next top-level span keeps original chunk
+
+    def test_robinhood_result_limit_splits_without_retrying(self):
+        # Robinhood Chain's RPC, Nov 15: each refused range was retried 6 times (~30 s of waits) before it was split
+        sent = []
+        saved = cc.http_json
+        cc.http_json = lambda url, body=None, **kw: sent.append(body) or {
+            "error": {"code": -32000, "message": "logs matched by query exceeds limit of 10000"}}
+        try:
+            with self.assertRaisesRegex(RuntimeError, "exceeds limit"):
+                cc.Rpc("u", 1000, 1).call("eth_getLogs", [{"fromBlock": "0x0", "toBlock": "0x3e7"}])
+        finally:
+            cc.http_json = saved
+        self.assertEqual(len(sent), 1)
+
+    def test_cap_stops_the_scan_inside_a_span_that_keeps_splitting(self):
+        # Robinhood Chain: one 5,000,000-block span of a busy coin split into hundreds of calls before the cap was looked at
+        r = cc.Rpc("u", 1_000_000, 1)
+        calls = []
+
+        def call(method, params):
+            a, b = int(params[0]["fromBlock"], 16), int(params[0]["toBlock"], 16)
+            calls.append((a, b))
+            if b - a + 1 > 1000:
+                raise RuntimeError("eth_getLogs: logs matched by query exceeds limit of 10000")
+            return [{}] * 100
+        r.call = call
+        got, complete = r.logs({}, 0, 999_999, cap=250)
+        self.assertFalse(complete)
+        self.assertEqual(len([c for c in calls if c[1] - c[0] + 1 <= 1000]), 3)  # 300 logs: the first read past 250
+
+    def test_without_a_cap_every_block_is_read(self):
+        r = cc.Rpc("u", 1_000_000, 1)
+
+        def call(method, params):
+            a, b = int(params[0]["fromBlock"], 16), int(params[0]["toBlock"], 16)
+            if b - a + 1 > 100_000:
+                raise RuntimeError("eth_getLogs: logs matched by query exceeds limit of 10000")
+            return [{"blockNumber": hex(a)}]
+        r.call = call
+        got, complete = r.logs({}, 0, 999_999)
+        self.assertTrue(complete)
+        self.assertEqual(len(got), 16)
 
 
 class ChainChunks(unittest.TestCase):

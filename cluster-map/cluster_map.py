@@ -313,7 +313,15 @@ def default_fetch_json(url, data=None, headers=None, timeout=HTTP_TIMEOUT_S):
     req = urllib.request.Request(url, data=data, headers=headers or {})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         body = resp.read().decode("utf-8")
-    return json.loads(body)
+    try:
+        return json.loads(body)
+    except ValueError:
+        parts = urllib.parse.urlsplit(url)
+        snippet = sanitize_error_text(body, "")
+        for _, value in urllib.parse.parse_qsl(parts.query):
+            if value:
+                snippet = snippet.replace(value, "[redacted]")
+        raise RuntimeError(f"{parts.hostname} returned a non-JSON response: {snippet[:80]}")
 
 
 class BlockscoutClient:
@@ -3468,11 +3476,15 @@ def main(argv=None):
         if solana_sources:
             source_data, rpc_responses = {"solana": solana_sources[0].memo}, {}
         meta = {"token": report["token"]["address"], "chain": args.chain, "top": args.top, "generated_at_utc": report["header"]["generated_at_utc"]}
-        save_fixture(args.record, meta, rpc_responses, source_data, secrets)
     if args.json:
         print(json.dumps(build_cli_json_summary(report), indent=2))
     else:
         print(summary_text)
+    if recorder is not None:
+        try:
+            save_fixture(args.record, meta, rpc_responses, source_data, secrets)
+        except (RuntimeError, OSError) as exc:
+            raise SystemExit(f"cluster-map: could not save the fixture: {exc}")
 
 
 if __name__ == "__main__":

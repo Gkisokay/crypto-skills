@@ -247,6 +247,11 @@ class ContractTraps(unittest.TestCase):
                 for slot, val in (cfg.get("stateDiff") or {}).items():
                     self.assertTrue(even.fullmatch(slot) and even.fullmatch(val), (slot, val))
 
+    def test_router_and_wrapped_addresses_are_20_bytes(self):
+        for table in (ct.ROUTER_BY_CHAIN, ct.WRAPPED_BY_CHAIN):
+            for chain, address in table.items():
+                self.assertEqual(len(address), 42, chain)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -15,7 +15,7 @@ ROUTER_BY_CHAIN = {
     "bsc": "0x10ed43c718714eb63d5aa57b78b54704e256024e",
 }
 WRAPPED_BY_CHAIN = {
-    "ethereum": "0xc02aa39b223fe8d0a0e5c4f27ead9083c756cc2",
+    "ethereum": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
     "base": "0x4200000000000000000000000000000000000006",
     "bsc": "0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c",
 }

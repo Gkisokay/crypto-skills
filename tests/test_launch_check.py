@@ -1687,6 +1687,25 @@ class HolderPatternHookErrors(unittest.TestCase):
         finally:
             cc.holder_patterns.evm_holder_pattern_flags, cc.gt_holders = saved
 
+    def test_finish_words_contract_trap_rpc_error_plainly(self):
+        import contract_traps
+        saved = cc.holder_patterns.evm_holder_pattern_flags, cc.gt_holders, contract_traps.check_contract_traps
+
+        class FakeRpc:
+            pass
+
+        cc.holder_patterns.evm_holder_pattern_flags = lambda *a, **k: ([], [])
+        cc.gt_holders = lambda chain, addr: None
+        contract_traps.check_contract_traps = lambda *a, **k: (_ for _ in ()).throw(RuntimeError(
+            "eth_call: {'code': -32602, 'message': 'Invalid params', 'data': 'odd number of digits at line 1 column 150'}"))
+        try:
+            out = cc.finish({"address": "0x" + "ab" * 20, "chain": "base", "notes": [], "supply": {}, "market": {}},
+                            FakeRpc(), "0x" + "ab" * 20, 1, 1, 0, None, 1)
+        finally:
+            cc.holder_patterns.evm_holder_pattern_flags, cc.gt_holders, contract_traps.check_contract_traps = saved
+        traps = [c for c in out["cant_check"] if c.startswith("Contract trap")]
+        self.assertEqual(traps, ["Contract trap checks couldn't finish: this RPC refused one of the calls (RuntimeError)."])
+
 
 class ReportWording(unittest.TestCase):
     def fdv_flag(self, dex, real):

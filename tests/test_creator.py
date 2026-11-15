@@ -338,6 +338,32 @@ class CreatorChecks(unittest.TestCase):
             creator.creator_exit_evm = saved
         self.assertTrue(any("Creator exit check couldn't finish: ValueError" in x for x in cant), cant)
 
+    def history_cant(self, trace_error):
+        class FakeRpc:
+            def call(self, method, params):
+                if method == "trace_filter":
+                    raise RuntimeError(trace_error)
+                raise AssertionError((method, params))
+
+        r = {"creator": "0x1111111111111111111111111111111111111111", "chain": "base",
+             "launch": {"block_time_s": 1.0}, "market": {"pairs": []}, "notes": [], "extra_flags": []}
+        cant = creator.add_evm_creator_checks(
+            cc, FakeRpc(), r, "0x9999999999999999999999999999999999999999",
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            100, 1700000000, 200, 1, 1000.0, []
+        )
+        return [x for x in cant if x.startswith("Creator history")]
+
+    def test_history_without_publicnode_token_names_the_variable(self):
+        cant = self.history_cant('{"code":403,"message":"Archive requests require a personal token. Get one free"}')
+        self.assertEqual(cant, ["Creator history wasn't checked: it needs archive data; "
+                                "set PUBLICNODE_TOKEN (free at allnodes.com/publicnode)."])
+
+    def test_history_block_range_limit_is_plain(self):
+        cant = self.history_cant("trace_filter: {'code': -32000, 'message': "
+                                 "'Block range too large; currently limited to 100 blocks'}")
+        self.assertEqual(cant, ["Creator history wasn't read: the provider limits this lookup to 100 blocks at a time."])
+
 
 if __name__ == "__main__":
     unittest.main()

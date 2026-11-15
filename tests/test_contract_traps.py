@@ -235,6 +235,23 @@ class ContractTraps(unittest.TestCase):
         out = self.check(FakeRpc(), chain="robinhood")
         self.assertTrue(any("robinhood" in x.lower() for x in out["cant_check"]), out["cant_check"])
 
+    def test_every_eth_call_sends_even_length_hex(self):
+        rpc = FakeRpc(tax_percent=35.0)
+        self.check(rpc)
+        even = re.compile(r"0x([0-9a-f]{2})*")
+        for method, params in rpc.calls:
+            if method != "eth_call":
+                continue
+            self.assertTrue(even.fullmatch(params[0]["data"]), params[0]["data"])
+            for cfg in (params[2] if len(params) > 2 else {}).values():
+                for slot, val in (cfg.get("stateDiff") or {}).items():
+                    self.assertTrue(even.fullmatch(slot) and even.fullmatch(val), (slot, val))
+
+    def test_router_and_wrapped_addresses_are_20_bytes(self):
+        for table in (ct.ROUTER_BY_CHAIN, ct.WRAPPED_BY_CHAIN):
+            for chain, address in table.items():
+                self.assertEqual(len(address), 42, chain)
+
 
 if __name__ == "__main__":
     unittest.main()

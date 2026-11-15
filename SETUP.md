@@ -32,8 +32,8 @@ You don't need all of them. Pick the chains you trade.
 | Helius API key | Solana | launch-check, cluster-map | 1M credits a month, 10 requests a second | [helius.dev](https://www.helius.dev) |
 | Blockscout API key | Robinhood Chain | cluster-map | 100K credits a day, 5 requests a second | [dev.blockscout.com](https://dev.blockscout.com) |
 
-With no keys at all, launch-check still checks new launches through public endpoints: in seconds on Base, more slowly
-on BNB Chain and Robinhood Chain. Solana needs Helius: its public endpoint rate-limits too hard.
+With no keys at all, launch-check still checks new launches through public endpoints: in seconds to about two minutes
+on Base, more slowly on BNB Chain and Robinhood Chain. Solana needs Helius: its public endpoint rate-limits too hard.
 
 Sign up, copy the key, and keep the tab open for the next step. **Never paste a key into a chat with an AI.** The
 skills read keys from your computer's environment, so the AI never needs to see them.

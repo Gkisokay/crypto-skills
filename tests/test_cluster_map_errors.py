@@ -1,3 +1,4 @@
+import contextlib
 import io
 import os
 import tempfile
@@ -14,6 +15,61 @@ class CliErrorTests(unittest.TestCase):
                 with self.assertRaises(SystemExit) as ctx:
                     CM.main([addr(5000), "--out", tmp, "--cache", os.path.join(tmp, "cache")])
         self.assertEqual(str(ctx.exception), "cluster-map: Blockscout request failed: HTTP 429")
+
+    def run_record(self, path, out, save_error=None):
+        report = {"token": {"address": addr(5000)}, "header": {"generated_at_utc": "2026-01-01T00:00:00Z"}}
+        with mock.patch.object(CM, "run_cluster_map", return_value=(report, "SUMMARY", None)):
+            with mock.patch("sys.stdout", new=io.StringIO()) as stdout:
+                patch = mock.patch.object(CM, "save_fixture", side_effect=save_error) if save_error else contextlib.nullcontext()
+                with patch:
+                    with self.assertRaises(SystemExit) as ctx:
+                        CM.main([addr(5000), "--out", out, "--cache", os.path.join(out, "cache"), "--record", path])
+        return str(ctx.exception), stdout.getvalue()
+
+    def test_record_into_missing_folder_is_one_line_exit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            message, stdout = self.run_record(os.path.join(tmp, "nope", "f.json.gz"), tmp)
+        self.assertTrue(message.startswith("cluster-map: could not save the fixture: "), message)
+        self.assertIn("SUMMARY", stdout)
+
+    def test_record_with_secret_is_one_line_exit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            message, _ = self.run_record(os.path.join(tmp, "f.json.gz"), tmp, RuntimeError("refusing to save a fixture that contains a key"))
+        self.assertEqual(message, "cluster-map: could not save the fixture: refusing to save a fixture that contains a key")
+
+
+class NonJsonBodyTests(unittest.TestCase):
+    def test_html_body_becomes_runtime_error_with_host_only(self):
+        class Resp(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        body = b"<html><body>Bad gateway apikey=SECRETKEY123</body></html>"
+        with mock.patch.object(CM.urllib.request, "urlopen", return_value=Resp(body)):
+            with self.assertRaises(RuntimeError) as ctx:
+                CM.default_fetch_json("https://api.example.com/path?apikey=SECRETKEY123")
+        message = str(ctx.exception)
+        self.assertIn("api.example.com", message)
+        self.assertIn("<html>", message)
+        self.assertNotIn("SECRETKEY123", message)
+        self.assertNotIn("/path", message)
+
+    def test_token_in_the_url_path_is_not_echoed(self):
+        class Resp(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        body = b"no route for /PATHTOKEN1234567890"
+        with mock.patch.object(CM.urllib.request, "urlopen", return_value=Resp(body)):
+            with self.assertRaises(RuntimeError) as ctx:
+                CM.default_fetch_json("https://rpc.example.com/PATHTOKEN1234567890")
+        self.assertNotIn("PATHTOKEN1234567890", str(ctx.exception))
 
 
 class RpcSanitizeTests(unittest.TestCase):

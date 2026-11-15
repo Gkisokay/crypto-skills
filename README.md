@@ -49,7 +49,9 @@ Paste a token address, get back:
 - **Solana liquidity pulls** from PumpSwap, Meteora and Raydium CPMM pools.
 
 launch-check is built for coins in their first 7 days. Older coins still get supply/FDV/holder summaries, but launch,
-bundle and liquidity checks are skipped.
+bundle and liquidity checks are skipped. Add `--any-age` to run the launch, creator, funder and holder checks on an older coin anyway (creator's
+share, funder clusters, labeled holders). It reads the coin's whole history, so it takes minutes; the liquidity
+checks stay skipped.
 
 It will never tell you a coin is "safe". The best it can say is that these checks found no red flags.
 
@@ -131,11 +133,13 @@ mkdir -p ~/.claude/skills && cp -R launch-check cluster-map ~/.claude/skills/
 ```
 python3 launch-check/launch_check.py <address>
 python3 launch-check/launch_check.py <address> --chain base
+python3 launch-check/launch_check.py <address> --any-age     # coins older than 7 days: creator, clusters, holders (slow)
 python3 -m unittest discover -s tests -q
 ```
 
 A check takes from seconds to about two minutes on Base and one to three minutes on Robinhood Chain. On an
-older coin, the report says the launch checks didn't run because launch-check is for the first 7 days.
+older coin, the report says the launch checks didn't run because launch-check is for the first 7 days; `--any-age`
+runs them anyway, except the liquidity checks.
 
 Always paste the full address. Copycat tokens share names and tickers.
 

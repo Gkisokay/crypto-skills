@@ -34,7 +34,11 @@ running. It sends the token address and the wallet addresses it looks up to DexS
 chain's RPC endpoint; say so if the user asks what is shared.
 
 launch-check is built for coins in their first 7 days; older coins still get supply/FDV/holder summaries, but launch,
-bundle and liquidity checks are skipped.
+bundle and liquidity checks are skipped. If the user wants the creator's share, funder clusters and labeled holders
+of an older coin, add `--any-age` (in code: `check(address, chain, any_age=True)`). It reads the coin's whole
+history, so it takes minutes; say so before running it. The liquidity checks (who controls it, whether it was
+pulled) stay skipped and the report says so. On a coin with more than 150,000 transfers the holder list still
+falls back to the summary.
 
 If the script exits with an error line instead of a report, show the user that line and what it suggests. An error
 is not a result: do not say or imply anything about the coin from a failed run. If the address isn't listed on

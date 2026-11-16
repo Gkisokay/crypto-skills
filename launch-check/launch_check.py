@@ -880,21 +880,25 @@ def check(addr, chain=None, any_age=False):
     if not addr.startswith("0x"):  # Solana addresses are base58 and case-sensitive
         chain, m = market(addr, "solana")
         if m:
-            cflag, ccant = copycat.find_copycat_flag(addr, "solana", m, http_json)
+            cflag, ccant, cnote = copycat.find_copycat_flag(addr, "solana", m, http_json)
             if cflag:
                 m["copycat_flag"] = cflag
             if ccant:
                 m["copycat_cant_check"] = ccant
+            if cnote:
+                m["copycat_note"] = cnote
         import solana_check
         return solana_check.check_solana(sys.modules[__name__], addr, m)
     addr = addr.lower()
     chain, m = market(addr, chain)
     if m:
-        cflag, ccant = copycat.find_copycat_flag(addr, chain, m, http_json)
+        cflag, ccant, cnote = copycat.find_copycat_flag(addr, chain, m, http_json)
         if cflag:
             m["copycat_flag"] = cflag
         if ccant:
             m["copycat_cant_check"] = ccant
+        if cnote:
+            m["copycat_note"] = cnote
     cfg = CHAINS[chain]
     url = os.environ.get("RPC_" + chain.upper()) or cfg["rpc"]
     if "publicnode.com" in url and os.environ.get("PUBLICNODE_TOKEN") and not os.environ.get("RPC_" + chain.upper()):
@@ -1329,6 +1333,8 @@ def finish(r, rpc, addr, unit, total, burned, t0, head, logs=None, rug_from=None
                           f"({type(e).__name__}); set PUBLICNODE_TOKEN (free at allnodes.com/publicnode).")
     if m.get("copycat_flag"):
         r.setdefault("extra_flags", []).append(m["copycat_flag"])
+    if m.get("copycat_note"):
+        r["notes"].append(m["copycat_note"])
     if m.get("copycat_cant_check"):
         extra_cant.append(m["copycat_cant_check"])
     contract_traps_cant = []

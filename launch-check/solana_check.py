@@ -365,6 +365,8 @@ def check_solana(cc, mint, m):
     r["extra_flags"] += hp_flags
     if m and m.get("copycat_flag"):
         r["extra_flags"].append(m["copycat_flag"])
+    if m and m.get("copycat_note"):
+        r.setdefault("notes", []).append(m["copycat_note"])
     r.setdefault("clusters", [])
     r["flags"] = cc.flags(r)
     r["flag_codes"] = cc.verdict.flag_codes(r["flags"])

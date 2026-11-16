@@ -50,9 +50,27 @@ class Copycat(unittest.TestCase):
         self.assertIn("age unknown", flag)
         self.assertNotIn("0 days older", flag)
 
+    def test_young_coin_is_flagged(self):
+        market = {"symbol": "AI", "dex_fdv": 185_000, "first_pair_ts": 1762444800}
+        flag, cant, note = copycat.find_copycat_flag(
+            "2T56GBrvcyeWWyhUAzsTFW4AcFag1nr7xyzrtZn7pump", "solana", market, lambda url: self.search,
+            now=1762444800 + 5 * 86400)
+        self.assertIn("Same ticker as AI on Robinhood Chain", flag)
+        self.assertIsNone(note)
+
+    def test_established_coin_gets_a_note_not_a_flag(self):
+        # a coin that has traded for months isn't riding another coin's ticker; the match is still worth saying
+        market = {"symbol": "AI", "dex_fdv": 185_000, "first_pair_ts": 1762444800}
+        flag, cant, note = copycat.find_copycat_flag(
+            "2T56GBrvcyeWWyhUAzsTFW4AcFag1nr7xyzrtZn7pump", "solana", market, lambda url: self.search,
+            now=1762444800 + 124 * 86400)
+        self.assertIsNone(flag)
+        self.assertIn("Shares its ticker with AI on Robinhood Chain", note)
+        self.assertIn("this coin is 124 days old itself, so it isn't counted as a copycat", note)
+
     def test_copycat_http_errors_return_cant_check_with_error_class(self):
         market = {"symbol": "AI"}
-        flag, cant = copycat.find_copycat_flag(
+        flag, cant, note = copycat.find_copycat_flag(
             "2T56GBrvcyeWWyhUAzsTFW4AcFag1nr7xyzrtZn7pump",
             "solana",
             market,

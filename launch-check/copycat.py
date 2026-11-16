@@ -1,11 +1,13 @@
 """Copycat ticker/name checks using DexScreener search."""
 
+import time
 import urllib.parse
 import urllib.error
 
 
 COPYCAT_MIN_FDV_MULTIPLIER = 3.0
 COPYCAT_MIN_DAYS_OLDER = 7
+COPYCAT_MAX_AGE_DAYS = 30  # past this a coin is established on its own; a ticker match is a note, not a flag
 LOOKALIKE_HEAD = 6
 LOOKALIKE_TAIL = 4
 
@@ -114,13 +116,21 @@ def find_copycat_from_search(current_addr, current_chain, market, search_data):
     return flag
 
 
-def find_copycat_flag(current_addr, current_chain, market, http_json):
+def find_copycat_flag(current_addr, current_chain, market, http_json, now=None):
+    """(flag, cant_check, note): a young coin's match is a flag; an established coin's is a note."""
     symbol = (market or {}).get("symbol") or ""
     if not symbol:
-        return None, None
+        return None, None, None
     url = "https://api.dexscreener.com/latest/dex/search?q=" + urllib.parse.quote(symbol)
     try:
         data = http_json(url)
     except (RuntimeError, OSError, urllib.error.HTTPError, urllib.error.URLError) as e:
-        return None, f"Copycat name/ticker check couldn't query DexScreener right now ({type(e).__name__})."
-    return find_copycat_from_search(current_addr, current_chain, market, data), None
+        return None, f"Copycat name/ticker check couldn't query DexScreener right now ({type(e).__name__}).", None
+    flag = find_copycat_from_search(current_addr, current_chain, market, data)
+    first = (market or {}).get("first_pair_ts")
+    age_days = int(((now or time.time()) - first) / 86400) if first else None
+    if flag and age_days is not None and age_days > COPYCAT_MAX_AGE_DAYS:
+        note = (flag.replace("Same ticker as", "Shares its ticker with", 1)[:-1]
+                + f"; this coin is {age_days} days old itself, so it isn't counted as a copycat.")
+        return None, None, note
+    return flag, None, None

@@ -174,6 +174,18 @@ class RpcCall(unittest.TestCase):
         self.assertEqual(asked[0], (0, 399))
 
 
+    def test_logs_response_too_big_is_not_retried(self):
+        calls = []
+
+        def too_big(url, body=None, **kw):
+            calls.append(body)
+            return {"jsonrpc": "2.0", "id": 1, "error": {"code": -32602, "message": "Response is too big"}}
+
+        cc.http_json = too_big
+        with self.assertRaisesRegex(RuntimeError, "too big"):
+            cc.Rpc("u", 1000, 1).call("eth_getLogs", [{}])
+        self.assertEqual(len(calls), 1)
+
 class HttpJson(unittest.TestCase):
     def setUp(self):
         self._open, self._sleep = cc.urllib.request.urlopen, cc.time.sleep

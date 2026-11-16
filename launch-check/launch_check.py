@@ -155,7 +155,7 @@ class Rpc:
     @staticmethod
     def _is_logs_max_results_error(msg):
         msg = msg.lower()
-        return any(k in msg for k in ("max results", "more than", "too many results", "response size", "exceeds limit"))
+        return any(k in msg for k in ("max results", "more than", "too many results", "response size", "exceeds limit", "too big"))
 
     @staticmethod
     def _is_pruned_state(err):

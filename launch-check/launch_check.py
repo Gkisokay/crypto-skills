@@ -97,6 +97,15 @@ def http_json(url, body=None, tries=7, deadline=None):
                 msg = e.read().decode(errors="replace")
                 if "archive" in msg.lower():  # publicnode without a token: old state is refused, not throttled
                     raise RuntimeError(msg) from e
+            if isinstance(e, urllib.error.HTTPError) and e.code == 400:
+                # some RPCs send a JSON-RPC error (e.g. a refused log range) as HTTP 400; the caller decides what it means
+                try:
+                    reply = json.loads(e.read())
+                except ValueError:
+                    raise e from None
+                if isinstance(reply, dict) and "error" in reply:
+                    return reply
+                raise
             # publicnode answers 403, not 429, when it throttles
             if i == tries - 1 or (isinstance(e, urllib.error.HTTPError) and e.code not in (403, 429, 500, 502, 503, 504)):
                 raise

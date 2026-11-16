@@ -145,6 +145,34 @@ class RpcCall(unittest.TestCase):
             cc.Rpc("u", 1000, 1).call("eth_getLogs", [{}])
         self.assertEqual(len(calls), 1)
 
+    def test_oversize_logs_refused_with_http_400_are_split(self):
+        import io
+        body = b'{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"Log response size exceeded."}}'
+        asked = []
+
+        def reply(req, timeout=None):
+            f = cc.json.loads(req.data)["params"][0]
+            a, b = int(f["fromBlock"], 16), int(f["toBlock"], 16)
+            asked.append((a, b))
+            if b - a > 100:
+                raise cc.urllib.error.HTTPError("u", 400, "Bad Request", {}, io.BytesIO(body))
+
+            class R(io.BytesIO):
+                def __enter__(self): return self
+                def __exit__(self, *e): pass
+            return R(b'{"jsonrpc":"2.0","id":1,"result":[{"blockNumber":"0x1"}]}')
+
+        cc.http_json = self._http
+        saved = cc.urllib.request.urlopen
+        cc.urllib.request.urlopen = reply
+        try:
+            got, done = cc.Rpc("https://rpc.example", 1000, 1).logs({}, 0, 399)
+        finally:
+            cc.urllib.request.urlopen = saved
+        self.assertTrue(done)
+        self.assertEqual(len(got), 4)
+        self.assertEqual(asked[0], (0, 399))
+
 
 class HttpJson(unittest.TestCase):
     def setUp(self):
@@ -169,6 +197,31 @@ class HttpJson(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "Archive"):
             cc.http_json("https://rpc.example", {})
         self.assertEqual(len(calls), 1)
+
+    def test_json_rpc_error_in_http_400_is_returned(self):
+        # some hosted RPCs (Nov 16) send a refused eth_getLogs as HTTP 400 with the JSON-RPC error in the body;
+        # the caller must see the error to split the range, not an HTTPError
+        import io
+        body = b'{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"Log response size exceeded."}}'
+        calls = []
+
+        def refuse(req, timeout=None):
+            calls.append(req)
+            raise cc.urllib.error.HTTPError("u", 400, "Bad Request", {}, io.BytesIO(body))
+
+        cc.urllib.request.urlopen = refuse
+        self.assertEqual(cc.http_json("https://rpc.example", {})["error"]["message"], "Log response size exceeded.")
+        self.assertEqual(len(calls), 1)
+
+    def test_http_400_without_json_rpc_error_raises(self):
+        import io
+
+        def refuse(req, timeout=None):
+            raise cc.urllib.error.HTTPError("u", 400, "Bad Request", {}, io.BytesIO(b"bad request"))
+
+        cc.urllib.request.urlopen = refuse
+        with self.assertRaises(cc.urllib.error.HTTPError):
+            cc.http_json("https://rpc.example", {})
 
 
 class NoArchive(unittest.TestCase):

@@ -327,6 +327,51 @@ class CreatorChecks(unittest.TestCase):
         flags = self.v4_exit(cc.SWAP_V4)
         self.assertFalse(any("moved" in x for x in flags), flags)
 
+    def creator_move(self, moved):
+        # Base coin, Nov 17: the creator kept 40% and moved 0.01% to another wallet; the verdict led with it
+        creator_addr = "0x1111111111111111111111111111111111111111"
+        other = "0x3333333333333333333333333333333333333333"
+        create_tx = "0x" + "a" * 64
+
+        def topic(addr):
+            return "0x" + "0" * 24 + addr[2:]
+
+        logs = [
+            {"blockNumber": "0x64", "transactionIndex": "0x0", "logIndex": "0x0", "transactionHash": create_tx,
+             "topics": [cc.TRANSFER, topic(cc.ZERO), topic(creator_addr)], "data": hex(400_000)},
+            {"blockNumber": "0x65", "transactionIndex": "0x0", "logIndex": "0x0", "transactionHash": "0x" + "d" * 64,
+             "topics": [cc.TRANSFER, topic(creator_addr), topic(other)], "data": hex(moved)},
+        ]
+
+        class FakeRpc:
+            def block_ts(self, n):
+                return {100: 1700000000, 101: 1700006300}[n]
+
+            def call(self, method, params):
+                if method == "trace_filter":
+                    return []
+                raise AssertionError((method, params))
+
+            def batch(self, calls):
+                return []
+
+        r = {"creator": creator_addr, "chain": "base", "market": None, "notes": [], "extra_flags": [],
+             "launch": {"block_time_s": 1.0}}
+        creator.add_evm_creator_checks(cc, FakeRpc(), r, "0x" + "9" * 40, create_tx, 100, 1700000000, 200, 1,
+                                       1_000_000.0, logs)
+        return r, cc.verdict.main_verdict(r["extra_flags"] + ["Creator wallet holds 40.0% of supply."])
+
+    def test_creator_move_under_1_percent_is_a_note_not_the_main_risk(self):
+        r, verdict = self.creator_move(100)  # 0.01% of supply
+        self.assertFalse(verdict.startswith("Main risk: the creator sold or moved"), verdict)
+        self.assertFalse(any("moved" in x for x in r["extra_flags"]), r["extra_flags"])
+        self.assertTrue(any("moved 0.01%" in x and "isn't a flag" in x for x in r["notes"]), r["notes"])
+
+    def test_creator_move_of_5_percent_still_leads(self):
+        r, verdict = self.creator_move(50_000)  # 5% of supply
+        self.assertTrue(verdict.startswith("Main risk: the creator sold or moved"), verdict)
+        self.assertTrue(any("moved 5.00%" in x for x in r["extra_flags"]), r["extra_flags"])
+
     def test_solana_history_public_rpc_tells_how_to_fix(self):
         def failing_call(method, params):
             raise RuntimeError("method not found")

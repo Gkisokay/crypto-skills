@@ -92,7 +92,7 @@ DexScreener yet, ask the user which chain it is on and pass `--chain`.
 - **Wallet farm:** 20+ plain wallets holding near-equal slices of the supply, usually made for this coin. The report
   samples who funded them one step back; a shared funder makes it stronger.
 - **Creator exit and history:** when the creator wallet sold or moved its tokens after launch (seconds after is the
-  pattern to lead with), and how many other coins it launched and where they are now. History stops at a time budget,
+  pattern to lead with; on EVM a move to another wallet under 1% of supply is only a note), and how many other coins it launched and where they are now. History stops at a time budget,
   so a serial launcher shows "at least" a number.
 - **Contract traps (EVM):** a simulated sell that reverts (honeypot) or loses a measured share (sell tax), and owner
   functions that can mint, blacklist or pause. Lead with a failed sell. **Token traps (Solana):** mint or freeze

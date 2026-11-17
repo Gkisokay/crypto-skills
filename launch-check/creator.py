@@ -11,6 +11,7 @@ MAX_HISTORY_SECONDS = 15
 MAX_HISTORY_CHECKED = 10
 MAX_HISTORY_LAUNCHES = 20  # enough to call a wallet a serial launcher; stop reading there
 SERIAL_LAUNCHER_MIN = 3  # fewer other launches is a note, not a red flag
+MIN_CREATOR_MOVE_PCT = 1.0  # a creator moving less of the supply than this is a note, not a red flag (Terry, Nov 17)
 LOW_FDV_USD = 5_000
 HISTORY_WINDOW_DAYS = 30
 MAX_EXIT_RECEIPTS = 5
@@ -266,7 +267,7 @@ def _is_lp_add_like_receipt(cc, receipt, creator, pool, token):
 
 def creator_exit_evm(cc, rpc, logs, creator, create_tx_hash, total_supply, unit, launch_ts, token, pools):
     if not logs or not creator or not create_tx_hash or total_supply <= 0 or unit <= 0:
-        return None, None, None
+        return None, None, None, None
     creator = creator.lower()
     create_tx_hash = create_tx_hash.lower()
     token = token.lower()
@@ -291,7 +292,7 @@ def creator_exit_evm(cc, rpc, logs, creator, create_tx_hash, total_supply, unit,
         if to == creator:
             create_recv += int(l.get("data", "0x0"), 16) / unit
     if create_recv <= 0:
-        return None, None, None
+        return None, None, None, None
 
     pool_tx_order = []
     pool_by_tx = {}
@@ -359,7 +360,7 @@ def creator_exit_evm(cc, rpc, logs, creator, create_tx_hash, total_supply, unit,
                         f"The creator wallet {creator} moved {pct2:.2f}% to {to2} "
                         f"{cc.human_span(span2)} later (tx {(move_tx.get(to2) or {}).get('transactionHash')})."
                     )
-                return sold_line, move_line, cant
+                return sold_line, move_line, pct2 if move_line else None, cant
             continue
         moves[to] += amt
         move_tx[to] = l
@@ -372,8 +373,8 @@ def creator_exit_evm(cc, rpc, logs, creator, create_tx_hash, total_supply, unit,
             f"The creator wallet {creator} moved {pct2:.2f}% to {to2} "
             f"{cc.human_span(span2)} later (tx {(move_tx.get(to2) or {}).get('transactionHash')})."
         )
-        return None, move_line, cant
-    return None, None, cant
+        return None, move_line, pct2, cant
+    return None, None, None, cant
 
 
 def _solana_history_launches(call, creator, current_mint, launch_ts, stop):
@@ -516,12 +517,14 @@ def add_evm_creator_checks(cc, rpc, r, token, mint_tx_hash, t0, t0_ts, head, uni
             use_logs, _ = rpc.logs({"address": token, "topics": [cc.TRANSFER]}, t0, min(head, t0 + 10_000), cap=5_000)
         market = r.get("market") or {}
         pools = set((market.get("pairs") or [])) | {cc.V4_POOL_MANAGERS.get(r.get("chain"))} - {None}
-        sold_line, move_line, receipt_cant = creator_exit_evm(
+        sold_line, move_line, move_pct, receipt_cant = creator_exit_evm(
             cc, rpc, use_logs, creator, mint_tx_hash, total, unit, t0_ts, token, pools
         )
         if sold_line:
             r.setdefault("extra_flags", []).append(sold_line)
-        if move_line:
+        if move_line and move_pct < MIN_CREATOR_MOVE_PCT:
+            r.setdefault("notes", []).append(move_line[:-1] + f"; under {MIN_CREATOR_MOVE_PCT:g}% of supply, so it isn't a flag.")
+        elif move_line:
             r.setdefault("extra_flags", []).append(move_line)
         if receipt_cant:
             cant.append(receipt_cant)

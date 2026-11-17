@@ -210,13 +210,13 @@ def summarize_creator_history(creator, launch_ts, launches, metrics, chain, part
 
 def creator_exit_solana(cc, txs, mint, creator, launch_total, launch_ts, pool_owners):
     if not txs or not creator or launch_total <= 0:
-        return None
+        return None, None
     pool_owners = set(pool_owners or [])
     txs = sorted(txs, key=lambda x: (x.get("slot") or 0, x.get("blockTime") or launch_ts))
     create_tx = txs[0]
     create_delta = max(_owner_deltas(create_tx, mint).get(creator, 0.0), 0.0)
     if create_delta <= 0:
-        return None
+        return None, None
     sold = 0.0
     t0 = create_tx.get("blockTime") or launch_ts
     for tx in txs[1:]:
@@ -234,10 +234,10 @@ def creator_exit_solana(cc, txs, mint, creator, launch_total, launch_ts, pool_ow
         dest = recv[0][0] if recv else ""
         if dest in pool_owners:
             return (f"The creator wallet {creator} sold {pct:.2f}% back to the curve/pool {dest} "
-                    f"{cc.human_span(span)} later (tx {sig}).")
+                    f"{cc.human_span(span)} later (tx {sig})."), None
         return (f"The creator wallet {creator} moved {pct:.2f}% to {dest or 'another wallet'} "
-                f"{cc.human_span(span)} later (tx {sig}).")
-    return None
+                f"{cc.human_span(span)} later (tx {sig})."), pct
+    return None, None
 
 
 def _hex_int(x):
@@ -467,8 +467,10 @@ def _evm_history_launches(cc, rpc, creator, current_token, launch_block, head, l
 def add_solana_creator_checks(cc, call, rpc_url, r, mint, creator, launch_ts, launch_total, txs, pool_owners=None):
     cant = []
     try:
-        line = creator_exit_solana(cc, txs, mint, creator, launch_total, launch_ts, pool_owners or set())
-        if line:
+        line, move_pct = creator_exit_solana(cc, txs, mint, creator, launch_total, launch_ts, pool_owners or set())
+        if line and move_pct is not None and move_pct < MIN_CREATOR_MOVE_PCT:
+            r.setdefault("notes", []).append(line[:-1] + f"; under {MIN_CREATOR_MOVE_PCT:g}% of supply, so it isn't a flag.")
+        elif line:
             r.setdefault("extra_flags", []).append(line)
     except (RuntimeError, OSError, ValueError, KeyError) as e:
         cant.append(f"Creator exit check couldn't finish: {type(e).__name__}: {str(e)[:120]}")

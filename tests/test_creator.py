@@ -17,7 +17,7 @@ class CreatorChecks(unittest.TestCase):
 
     def test_solana_creator_exit_3_seconds(self):
         d = self.load("creator_exit_solana.json")
-        line = creator.creator_exit_solana(
+        line, _ = creator.creator_exit_solana(
             cc,
             d["txs"],
             d["mint"],
@@ -45,7 +45,7 @@ class CreatorChecks(unittest.TestCase):
                 {"mint": d["mint"], "owner": d["creator"], "uiTokenAmount": {"uiAmount": 0.0}},
             ],
         }
-        line = creator.creator_exit_solana(
+        line, _ = creator.creator_exit_solana(
             cc,
             [d["txs"][0], moved],
             d["mint"],
@@ -56,6 +56,33 @@ class CreatorChecks(unittest.TestCase):
         )
         self.assertIn("moved", line)
         self.assertNotIn("sold", line)
+
+    def solana_creator_move(self, amount):
+        mint, dev, other, curve = "Mint" + "1" * 40, "Dev" + "1" * 41, "Other" + "1" * 39, "Curve" + "1" * 39
+
+        def tx(slot, ts, before, after):
+            bal = lambda rows: [{"mint": mint, "owner": o, "uiTokenAmount": {"uiAmount": a}} for o, a in rows.items()]
+            return {"slot": slot, "blockTime": ts, "transaction": {"signatures": ["Sig%d" % slot]},
+                    "meta": {"preTokenBalances": bal(before), "postTokenBalances": bal(after)}}
+
+        txs = [tx(10, 1700000000, {curve: 1_000_000.0}, {curve: 1_000_000.0 - amount, dev: amount}),
+               tx(11, 1700000060, {dev: amount, other: 0.0}, {dev: 0.0, other: amount})]
+        r = {"notes": [], "extra_flags": []}
+        creator.add_solana_creator_checks(cc, lambda m, p: {"data": [], "paginationToken": None},
+                                          "https://mainnet.helius-rpc.com/?api-key=x", r, mint, dev, 1700000000,
+                                          1_000_000.0, txs, {curve})
+        return r, cc.verdict.main_verdict(r["extra_flags"] + ["Top 10 people (pools, burns, contracts excluded) hold 40.0%."])
+
+    def test_solana_creator_move_under_1_percent_is_a_note_not_the_main_risk(self):
+        r, verdict = self.solana_creator_move(100.0)  # 0.01% of supply
+        self.assertFalse(verdict.startswith("Main risk: the creator sold or moved"), verdict)
+        self.assertFalse(any("moved" in x for x in r["extra_flags"]), r["extra_flags"])
+        self.assertTrue(any("moved 0.01%" in x and "isn't a flag" in x for x in r["notes"]), r["notes"])
+
+    def test_solana_creator_move_of_5_percent_still_leads(self):
+        r, verdict = self.solana_creator_move(50_000.0)  # 5% of supply
+        self.assertTrue(verdict.startswith("Main risk: the creator sold or moved"), verdict)
+        self.assertTrue(any("moved 5.00%" in x for x in r["extra_flags"]), r["extra_flags"])
 
     def test_solana_creator_with_no_other_launches_says_so(self):
         # KOSMIK (Nov 14): the creator had no other launches and the report printed nothing about history

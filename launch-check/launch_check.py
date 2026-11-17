@@ -45,6 +45,13 @@ INCREASE_V3 = "0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35
 INITIALIZE_V4 = "0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438"
 MODIFY_V4 = "0xf208f4912782fd25c7f114ca3723a2d5dd6f3bcc3ac8db5af63baa85f711d5ec"
 SWAP_V4 = "0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f"
+# Uniswap v4's PoolManager holds every v4 pool's tokens: the only Initialize emitter on each chain, read Nov 17 2026
+# (Elysium's and Robinhood Chain's are v4-style managers too). HyperEVM showed none.
+V4_POOL_MANAGERS = {"ethereum": "0x000000000004444c5dc75cb358380d2e3de08a90",
+                    "base": "0x498581ff718922c3f8e6a244956af099b2652b2b",
+                    "bsc": "0x28e2ea090877bf75740558f6bfb36a5ffee9e9df",
+                    "robinhood": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+                    "elysium": "0xe2e105d3f7209a9da11f83ccf3e7398a753823f1"}
 MINIMUM_LIQUIDITY = 1000
 
 # chunk = blocks per eth_getLogs call that the default RPC accepted in testing (Nov 10 2026)

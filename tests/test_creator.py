@@ -284,6 +284,49 @@ class CreatorChecks(unittest.TestCase):
         self.assertTrue(any("moved" in x and other in x for x in r["extra_flags"]), r["extra_flags"])
         self.assertFalse(any("sold" in x for x in r["extra_flags"]), r["extra_flags"])
 
+    def v4_exit(self, pool_event):
+        # Base coin with no DexScreener pools: the creator sent 40% to Uniswap v4's PoolManager 5 s after launch (Nov 16 audit)
+        creator_addr = "0x1111111111111111111111111111111111111111"
+        manager = cc.V4_POOL_MANAGERS["base"]
+        token = "0x9999999999999999999999999999999999999999"
+        create_tx = "0x" + "a" * 64
+        add_tx = "0x" + "d" * 64
+
+        def topic(addr):
+            return "0x" + "0" * 24 + addr[2:]
+
+        logs = [
+            {"blockNumber": "0x64", "transactionIndex": "0x0", "logIndex": "0x0", "transactionHash": create_tx,
+             "topics": [cc.TRANSFER, topic(cc.ZERO), topic(creator_addr)], "data": hex(1_000_000)},
+            {"blockNumber": "0x65", "transactionIndex": "0x0", "logIndex": "0x0", "transactionHash": add_tx,
+             "topics": [cc.TRANSFER, topic(creator_addr), topic(manager)], "data": hex(400_000)},
+        ]
+        receipt = {"logs": [logs[1], {"address": manager, "topics": [pool_event, "0x" + "e" * 64], "data": "0x"}]}
+
+        class FakeRpc:
+            def block_ts(self, n):
+                return {100: 1700000000, 101: 1700000005}[n]
+
+            def call(self, method, params):
+                if method == "trace_filter":  # the creator-history step that follows
+                    return []
+                assert method == "eth_getTransactionReceipt" and params == [add_tx]
+                return receipt
+
+            def batch(self, calls):
+                return []
+
+        r = {"creator": creator_addr, "chain": "base", "market": None, "notes": [], "extra_flags": []}
+        creator.add_evm_creator_checks(cc, FakeRpc(), r, token, create_tx, 100, 1700000000, 200, 1, 1_000_000.0, logs)
+        return r["extra_flags"]
+
+    def test_evm_v4_liquidity_add_is_not_a_creator_exit(self):
+        self.assertEqual(self.v4_exit(cc.MODIFY_V4), [])
+
+    def test_evm_v4_swap_into_the_pool_manager_is_still_a_sale(self):
+        flags = self.v4_exit(cc.SWAP_V4)
+        self.assertFalse(any("moved" in x for x in flags), flags)
+
     def test_solana_history_public_rpc_tells_how_to_fix(self):
         def failing_call(method, params):
             raise RuntimeError("method not found")

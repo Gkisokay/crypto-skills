@@ -68,6 +68,31 @@ class Copycat(unittest.TestCase):
         self.assertIn("Shares its ticker with AI on Robinhood Chain", note)
         self.assertIn("this coin is 124 days old itself, so it isn't counted as a copycat", note)
 
+    def test_an_address_imitating_the_original_keeps_the_flag_at_any_age(self):
+        # a copy that mimics the original's first and last characters is a copy however long it has traded (Terry, Nov 16)
+        market = {"symbol": "AI", "dex_fdv": 210_000, "first_pair_ts": 1762012800}
+        flag, cant, note = copycat.find_copycat_flag(
+            "0xce8cfbd3776d8f6920757d3bb0d56a89bdf01e18", "robinhood", market, lambda url: self.search,
+            now=1762012800 + 124 * 86400)
+        self.assertIsNone(note)
+        self.assertIn("Same ticker as AI on Robinhood Chain", flag)
+        self.assertIn("0xce8cfbd3776d8f6920757d3bb0d56a89bdf01e18", flag)
+
+    def test_an_impossible_fdv_is_not_compared_against(self):
+        # DexScreener listed an NVDAX at $14.6 trillion FDV, and the flag quoted it (Nov 16 audit)
+        def pair(addr, fdv, created):
+            return {"chainId": "hyperliquid", "fdv": fdv, "pairCreatedAt": created * 1000,
+                    "baseToken": {"address": addr, "symbol": "NVDAX", "name": "NVDAX"}}
+        market = {"symbol": "NVDAX", "dex_fdv": 50_000, "first_pair_ts": 1762012800}
+        broken, real = "0x" + "1" * 40, "0x" + "2" * 40
+        search = {"pairs": [pair(broken, 14_617_200_003_973, 1730000000), pair(real, 40_000_000, 1730000000)]}
+        flag = copycat.find_copycat_from_search("0x" + "3" * 40, "base", market, search)
+        self.assertIn(real, flag)
+        self.assertNotIn(broken, flag)
+        self.assertNotIn("14,617", flag)
+        only_broken = {"pairs": search["pairs"][:1]}
+        self.assertIsNone(copycat.find_copycat_from_search("0x" + "3" * 40, "base", market, only_broken))
+
     def test_copycat_http_errors_return_cant_check_with_error_class(self):
         market = {"symbol": "AI"}
         flag, cant, note = copycat.find_copycat_flag(

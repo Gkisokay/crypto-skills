@@ -8,6 +8,7 @@ import urllib.error
 COPYCAT_MIN_FDV_MULTIPLIER = 3.0
 COPYCAT_MIN_DAYS_OLDER = 7
 COPYCAT_MAX_AGE_DAYS = 30  # past this a coin is established on its own; a ticker match is a note, not a flag
+COPYCAT_MAX_FDV = 1e12  # no token trades at a $1T+ FDV on a DEX; a figure above it is a broken listing
 LOOKALIKE_HEAD = 6
 LOOKALIKE_TAIL = 4
 
@@ -72,12 +73,17 @@ def _token_rows(search_data, symbol):
 
 
 def find_copycat_from_search(current_addr, current_chain, market, search_data):
+    return _copycat(current_addr, current_chain, market, search_data)[0]
+
+
+def _copycat(current_addr, current_chain, market, search_data):
+    """(flag, imitates): imitates is True when this coin's own address mimics the original's on its chain."""
     symbol = (market or {}).get("symbol") or ""
     if not symbol:
-        return None
-    rows = _token_rows(search_data, symbol)
+        return None, False
+    rows = [r for r in _token_rows(search_data, symbol) if r["fdv"] <= COPYCAT_MAX_FDV]
     if not rows:
-        return None
+        return None, False
     now_chain = _norm_chain(current_chain)
     now_addr = current_addr.lower() if _is_evm(current_addr) else current_addr
     now_fdv = float((market or {}).get("dex_fdv") or 0.0)
@@ -96,7 +102,7 @@ def find_copycat_from_search(current_addr, current_chain, market, search_data):
                 continue
         cands.append(r)
     if not cands:
-        return None
+        return None, False
 
     def score(x):
         older = int((now_ts - x["first_ts"]) / 86400) if now_ts and x["first_ts"] else 0
@@ -113,7 +119,7 @@ def find_copycat_from_search(current_addr, current_chain, market, search_data):
     if lookalike:
         flag = (flag[:-1] + f" Same-chain look-alike address {lookalike['address']} shares the first "
                 f"{LOOKALIKE_HEAD} and last {LOOKALIKE_TAIL} characters with {base['address']}.")
-    return flag
+    return flag, base["chain"] == now_chain and _looks_like(now_addr, base["address"])
 
 
 def find_copycat_flag(current_addr, current_chain, market, http_json, now=None):
@@ -126,10 +132,10 @@ def find_copycat_flag(current_addr, current_chain, market, http_json, now=None):
         data = http_json(url)
     except (RuntimeError, OSError, urllib.error.HTTPError, urllib.error.URLError) as e:
         return None, f"Copycat name/ticker check couldn't query DexScreener right now ({type(e).__name__}).", None
-    flag = find_copycat_from_search(current_addr, current_chain, market, data)
+    flag, imitates = _copycat(current_addr, current_chain, market, data)
     first = (market or {}).get("first_pair_ts")
     age_days = int(((now or time.time()) - first) / 86400) if first else None
-    if flag and age_days is not None and age_days > COPYCAT_MAX_AGE_DAYS:
+    if flag and not imitates and age_days is not None and age_days > COPYCAT_MAX_AGE_DAYS:
         note = (flag.replace("Same ticker as", "Shares its ticker with", 1)[:-1]
                 + f"; this coin is {age_days} days old itself, so it isn't counted as a copycat.")
         return None, None, note

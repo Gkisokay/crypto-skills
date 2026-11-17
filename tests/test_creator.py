@@ -158,6 +158,36 @@ class CreatorChecks(unittest.TestCase):
         got = creator._extract_created_mints(tx)
         self.assertIn("MintInner1111111111111111111111111111111111", got)
 
+    def test_evm_round_trip_back_to_creator_is_netted_not_summed(self):
+        creator_addr = "0x" + "11" * 20
+        helper = "0x" + "33" * 20
+        create_tx = "0x" + "aa" * 32
+
+        def topic(addr):
+            return "0x" + "0" * 24 + addr[2:]
+
+        def log(block, frm, to, amt, tx):
+            return {"blockNumber": hex(block), "transactionIndex": "0x0", "logIndex": "0x0", "transactionHash": tx,
+                    "topics": [cc.TRANSFER, topic(frm), topic(to)], "data": hex(amt)}
+
+        zero = "0x" + "00" * 20
+        logs = [
+            log(100, zero, creator_addr, 1000, create_tx),
+            log(101, creator_addr, helper, 1000, "0x" + "b1" * 32),
+            log(102, "0x" + "44" * 20, creator_addr, 700, "0x" + "b2" * 32),
+            log(103, creator_addr, helper, 700, "0x" + "b3" * 32),
+        ]
+
+        class FakeRpc:
+            def block_ts(self, n):
+                return 1700000000 + n
+
+        _, move_line, move_pct, _ = creator.creator_exit_evm(
+            cc, FakeRpc(), logs, creator_addr, create_tx, 1000.0, 1, 1700000000, "0x" + "99" * 20, set()
+        )
+        self.assertAlmostEqual(move_pct, 100.0)
+        self.assertIn("moved 100.00%", move_line)
+
     def test_evm_lp_add_then_hold_has_no_exit_line(self):
         d = self.load("creator_exit_evm.json")
         creator_addr = d["creator"]

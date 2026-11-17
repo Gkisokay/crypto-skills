@@ -333,9 +333,13 @@ def creator_exit_evm(cc, rpc, logs, creator, create_tx_hash, total_supply, unit,
         if len(topics) < 3 or topics[0] != cc.TRANSFER:
             continue
         frm = "0x" + topics[1][26:].lower()
+        to = "0x" + topics[2][26:].lower()
+        if to == creator and moves:
+            back = frm if frm in moves else max(moves, key=moves.get)
+            moves[back] -= int(l.get("data", "0x0"), 16) / unit
+            continue
         if frm != creator:
             continue
-        to = "0x" + topics[2][26:].lower()
         amt = int(l.get("data", "0x0"), 16) / unit
         txh = (l.get("transactionHash") or "").lower()
         if to in pools:

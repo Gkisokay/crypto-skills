@@ -252,7 +252,7 @@ def _is_lp_add_like_receipt(cc, receipt, creator, pool, token):
     creator_to_pool = 0
     for l in logs:
         topics = l.get("topics") or []
-        if topics and topics[0] in (cc.MINT_V2, cc.MINT_V3) and (l.get("address") or "").lower() == pool:
+        if topics and topics[0] in (cc.MINT_V2, cc.MINT_V3, cc.MODIFY_V4) and (l.get("address") or "").lower() == pool:
             return True
         if len(topics) >= 3 and topics[0] == cc.TRANSFER:
             frm = "0x" + topics[1][26:].lower()
@@ -515,7 +515,7 @@ def add_evm_creator_checks(cc, rpc, r, token, mint_tx_hash, t0, t0_ts, head, uni
         if use_logs is None:
             use_logs, _ = rpc.logs({"address": token, "topics": [cc.TRANSFER]}, t0, min(head, t0 + 10_000), cap=5_000)
         market = r.get("market") or {}
-        pools = set((market.get("pairs") or []))
+        pools = set((market.get("pairs") or [])) | {cc.V4_POOL_MANAGERS.get(r.get("chain"))} - {None}
         sold_line, move_line, receipt_cant = creator_exit_evm(
             cc, rpc, use_logs, creator, mint_tx_hash, total, unit, t0_ts, token, pools
         )

@@ -335,8 +335,9 @@ def creator_exit_evm(cc, rpc, logs, creator, create_tx_hash, total_supply, unit,
         frm = "0x" + topics[1][26:].lower()
         to = "0x" + topics[2][26:].lower()
         if to == creator and moves:
-            back = frm if frm in moves else max(moves, key=moves.get)
-            moves[back] -= int(l.get("data", "0x0"), 16) / unit
+            if frm not in pools:
+                back = frm if frm in moves else max(moves, key=moves.get)
+                moves[back] = max(0.0, moves[back] - int(l.get("data", "0x0"), 16) / unit)
             continue
         if frm != creator:
             continue

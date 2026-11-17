@@ -188,6 +188,35 @@ class CreatorChecks(unittest.TestCase):
         self.assertAlmostEqual(move_pct, 100.0)
         self.assertIn("moved 100.00%", move_line)
 
+    def _evm_moved(self, steps):
+        creator_addr = "0x" + "11" * 20
+        helper = "0x" + "33" * 20
+        pool = "0x" + "22" * 20
+        create_tx = "0x" + "aa" * 32
+        addrs = {"creator": creator_addr, "helper": helper, "pool": pool, "zero": "0x" + "00" * 20, "other": "0x" + "44" * 20}
+
+        def topic(addr):
+            return "0x" + "0" * 24 + addr[2:]
+
+        logs = [{"blockNumber": hex(100 + i), "transactionIndex": "0x0", "logIndex": "0x0",
+                 "transactionHash": create_tx if i == 0 else "0x" + format(i, "02x") * 32,
+                 "topics": [cc.TRANSFER, topic(addrs[f]), topic(addrs[t])], "data": hex(a)}
+                for i, (f, t, a) in enumerate(steps)]
+
+        class FakeRpc:
+            def block_ts(self, n):
+                return 1700000000 + n
+
+        return creator.creator_exit_evm(cc, FakeRpc(), logs, creator_addr, create_tx, 1000.0, 1, 1700000000, "0x" + "99" * 20, {pool})
+
+    def test_evm_buyback_from_pool_is_not_netted(self):
+        _, _, move_pct, _ = self._evm_moved([("zero", "creator", 1000), ("creator", "helper", 500), ("pool", "creator", 300)])
+        self.assertAlmostEqual(move_pct, 50.0)
+
+    def test_evm_return_larger_than_moved_floors_at_zero(self):
+        _, _, move_pct, _ = self._evm_moved([("zero", "creator", 1000), ("creator", "helper", 100), ("other", "creator", 400)])
+        self.assertEqual(move_pct, 0.0)
+
     def test_evm_lp_add_then_hold_has_no_exit_line(self):
         d = self.load("creator_exit_evm.json")
         creator_addr = d["creator"]

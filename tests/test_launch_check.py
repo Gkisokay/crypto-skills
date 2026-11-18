@@ -478,6 +478,16 @@ class AnyAge(unittest.TestCase):
         self.assertEqual(self.lp_scans, [])
         self.assertTrue(any("liquidity checks" in n and "were skipped" in n for n in r["notes"]), r["notes"])
 
+    def test_any_age_without_a_mint_leaves_the_liquidity_history_out_and_says_so(self):
+        m = cc.market(self.TOKEN, "base")[1]
+        m["first_pair_ts"] = self.HEAD - 8 * 86400  # the mint is 8 days before the first pool, outside the 7-day walk back
+        cc.market = lambda addr, chain: ("base", m)
+        r = cc.check(self.TOKEN, "base", any_age=True)
+        self.assertNotIn("launch", r)
+        self.assertEqual(self.lp_scans, [])
+        self.assertTrue(any("Couldn't find the mint within 7 days" in n for n in r["notes"]), r["notes"])
+        self.assertTrue(any("liquidity checks" in n and "were skipped" in n for n in r["notes"]), r["notes"])
+
     def test_any_age_changes_nothing_on_a_new_coin(self):
         fresh = cc.market(self.TOKEN, "base")[1]
         fresh["first_pair_ts"] = self.HEAD - 86400
@@ -1888,12 +1898,45 @@ class MarketData(unittest.TestCase):
         finally:
             cc.http_json = saved
 
-    def pair(self, address, liquidity):
+    def pair(self, address, liquidity, base=None, price="1"):
         p = {"chainId": "base", "pairAddress": address, "baseToken": {"address": self.TOKEN, "symbol": "T"},
-             "priceUsd": "1", "fdv": 1000, "pairCreatedAt": 1794375412000}
+             "priceUsd": price, "fdv": 1000, "pairCreatedAt": 1794375412000}
         if liquidity is not None:
             p["liquidity"] = {"usd": liquidity}
+            if base is not None:
+                p["liquidity"]["base"] = base
         return p
+
+    def test_real_money_leaves_out_the_coins_own_tokens(self):
+        # one token priced like one WETH: 299.2364 tokens and 2.9997 WETH list as ~$546K, but only ~$5.4K is real money
+        pool = "0x" + "22" * 20
+        m = self.market([self.pair(pool, 545838.4, base=299.2364, price="1806")])
+        self.assertAlmostEqual(m["liquidity"], 545838.4)
+        self.assertAlmostEqual(m["real_liquidity"], 5417.2, delta=1)
+        self.assertAlmostEqual(m["pair_real_liquidity"][pool], 5417.2, delta=1)
+        self.assertGreater(m["coin_side_share"], 0.98)
+        flag, cant = cc.holder_patterns.coin_side_flag(m)
+        self.assertEqual(flag, "The pool is mostly this coin's own tokens; real money in it is about $5,417.")
+        self.assertIsNone(cant)
+
+    def test_normal_pool_is_unchanged_except_the_real_money_fields(self):
+        pool = "0x" + "33" * 20
+        m = self.market([self.pair(pool, 2000.0, base=1000.0)])
+        self.assertEqual((m["liquidity"], m["pair_liquidity"], m["pairs"], m["price"], m["dex_fdv"]),
+                         (2000.0, {pool: 2000.0}, [pool], 1.0, 1000))
+        self.assertEqual((m["real_liquidity"], m["pair_real_liquidity"], m["coin_side_share"]), (1000.0, {pool: 1000.0}, 0.5))
+        self.assertEqual(cc.holder_patterns.coin_side_flag(m), (None, None))
+
+    def test_missing_coin_side_figure_is_not_checked_not_guessed(self):
+        pool = "0x" + "44" * 20
+        m = self.market([self.pair(pool, 545838.4, price="1806")])
+        self.assertIsNone(m["real_liquidity"])
+        self.assertIsNone(m["coin_side_share"])
+        self.assertEqual(m["pair_real_liquidity"], {})
+        flag, cant = cc.holder_patterns.coin_side_flag(m)
+        self.assertIsNone(flag)
+        self.assertEqual(cant, "How much of the main pool is real money wasn't checked: DexScreener gave no figure for "
+                               "the coin's own side of it.")
 
     def test_missing_liquidity_figure_is_unknown_not_zero(self):
         m = self.market([self.pair(self.V4, None)])

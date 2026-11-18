@@ -64,6 +64,17 @@ class HolderPatterns(unittest.TestCase):
         self.assertIn("(500x)", flagged)
         self.assertIsNone(clear)
 
+    def test_fake_market_cap_uses_real_money_when_known(self):
+        flag = hp.fake_market_cap_flag({"dex_fdv": 1_000_000, "liquidity": 545_838, "real_liquidity": 5_417})
+        self.assertEqual(flag, "FDV is $1,000,000 while real money in its pools is $5,417 (185x); "
+                               "that gap is far larger than this liquidity can support.")
+
+    def test_coin_side_flag_reaches_the_evm_report(self):
+        m = {"dex_fdv": 0, "liquidity": 545_838, "real_liquidity": 5_417, "coin_side_share": 0.99,
+             "main_pool": "0x" + "22" * 20, "pair_real_liquidity": {"0x" + "22" * 20: 5_417}}
+        flags, _ = hp.evm_holder_pattern_flags(None, "0x" + "ab" * 20, 1.0, 1, m, None, None, [], 2.0)
+        self.assertIn("The pool is mostly this coin's own tokens; real money in it is about $5,417.", flags)
+
     def test_fake_volume_back_and_forth_pattern(self):
         stats = {}
         for i in range(4):

@@ -27,6 +27,7 @@ SOLANA_HOLDER_READ_BUDGET_S = 20.0
 
 EXTREME_FDV_TO_LIQUIDITY_RATIO = 120.0
 EXTREME_FDV_MIN_USD = 50_000
+COIN_SIDE_MAX_SHARE = 0.90
 
 FAKE_VOLUME_TOP_WALLETS = 4
 FAKE_VOLUME_MIN_TOTAL_SWAPS = 80
@@ -57,7 +58,8 @@ def fake_market_cap_flag(market):
     if not market:
         return None
     fdv = float(market.get("dex_fdv") or 0.0)
-    liq = market.get("liquidity")
+    real = market.get("real_liquidity")
+    liq = market.get("liquidity") if real is None else real
     if liq is None:
         return None
     liq = float(liq or 0.0)
@@ -66,8 +68,23 @@ def fake_market_cap_flag(market):
     ratio = fdv / liq
     if ratio < EXTREME_FDV_TO_LIQUIDITY_RATIO:
         return None
-    return (f"FDV is ${fdv:,.0f} while listed liquidity is ${liq:,.0f} ({ratio:.0f}x); "
+    what = "listed liquidity" if real is None else "real money in its pools"
+    return (f"FDV is ${fdv:,.0f} while {what} is ${liq:,.0f} ({ratio:.0f}x); "
             "that gap is far larger than this liquidity can support.")
+
+
+def coin_side_flag(market):
+    """(flag, cant_check) for a main pool whose listed value is mostly the coin's own tokens."""
+    if not market:
+        return None, None
+    share = market.get("coin_side_share")
+    if share is None:
+        return None, ("How much of the main pool is real money wasn't checked: DexScreener gave no figure for "
+                      "the coin's own side of it.")
+    if share <= COIN_SIDE_MAX_SHARE:
+        return None, None
+    real = (market.get("pair_real_liquidity") or {})[market["main_pool"]]
+    return f"The pool is mostly this coin's own tokens; real money in it is about ${real:,.0f}.", None
 
 
 def _equal_slice_group(people_rows):
@@ -259,6 +276,11 @@ def evm_holder_pattern_flags(rpc, token, total_supply, unit, market, logs, repla
     mc = fake_market_cap_flag(market)
     if mc:
         flags.append(mc)
+    cs, cs_cant = coin_side_flag(market)
+    if cs:
+        flags.append(cs)
+    if cs_cant:
+        cant.append(cs_cant)
 
     if logs and replay_bal and total_supply > 0:
         excluded = {token.lower(), "0x" + "0" * 40, "0x000000000000000000000000000000000000dead"}
@@ -388,6 +410,11 @@ def solana_holder_pattern_flags(call, mint, total_supply, market, excluded_walle
     mc = fake_market_cap_flag(market)
     if mc:
         flags.append(mc)
+    cs, cs_cant = coin_side_flag(market)
+    if cs:
+        flags.append(cs)
+    if cs_cant:
+        cant.append(cs_cant)
 
     rpc_errors = (RuntimeError, OSError, urllib.error.HTTPError, urllib.error.URLError)
     try:

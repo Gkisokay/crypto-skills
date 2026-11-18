@@ -98,6 +98,11 @@ DexScreener yet, ask the user which chain it is on and pass `--chain`.
   functions that can mint, blacklist or pause. Lead with a failed sell. **Token traps (Solana):** mint or freeze
   authority still set, and Token-2022 extensions that can block transfers or take fees.
 - **FDV far above liquidity:** a market cap the pool can't support; selling even a small share moves the price a lot.
+  It is measured against the real money in the pools (the listed liquidity minus the coin's own tokens) when
+  DexScreener gives that split, and against the listed liquidity otherwise; the flag says which.
+- **Pool mostly the coin's own tokens:** more than 90% of the main pool's listed value is the coin itself, so the
+  liquidity figure overstates what a seller can get out. Give the real-money figure the flag names. When DexScreener
+  doesn't give the split, the report lists this as not checked.
 - **Copycat name:** the same ticker or name as a bigger, older coin, often on another chain. Give both full addresses.
 - **Solana liquidity:** pulls from PumpSwap, Meteora and Raydium CPMM pools are checked; who controls Solana pool
   liquidity isn't. Do not say or imply that Solana liquidity is locked or safe; say control wasn't checked.

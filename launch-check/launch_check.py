@@ -861,6 +861,16 @@ def market(addr, chain):
         a = norm(p.get("pairAddress") or "")
         if a and usd(p) is not None:
             pair_liquidity[a] = pair_liquidity.get(a, 0.0) + float(usd(p))
+    # real money: the listed figure minus the coin's own tokens in the pool; None when DexScreener omits the coin side
+    coin_side = lambda p: (float((p.get("liquidity") or {})["base"]) * float(p["priceUsd"])
+                           if usd(p) is not None and (p.get("liquidity") or {}).get("base") is not None and p.get("priceUsd")
+                           else None)
+    pair_real_liquidity = {}
+    for p in pairs:
+        a = norm(p.get("pairAddress") or "")
+        if a and coin_side(p) is not None:
+            pair_real_liquidity[a] = pair_real_liquidity.get(a, 0.0) + max(float(usd(p)) - coin_side(p), 0.0)
+    top_side = coin_side(top)
     created = [p["pairCreatedAt"] for p in pairs if p.get("pairCreatedAt")]
     return chain, {
         "symbol": top["baseToken"]["symbol"], "price": float(top.get("priceUsd") or 0), "dex_fdv": top.get("fdv"),
@@ -868,6 +878,11 @@ def market(addr, chain):
         "pairs": sorted({norm(p["pairAddress"]) for p in pairs if evm and len(p.get("pairAddress") or "") == 42}),
         "pairs_any": sorted({norm(p["pairAddress"]) for p in pairs if p.get("pairAddress")}),
         "pair_liquidity": pair_liquidity,
+        "real_liquidity": (sum(pair_real_liquidity.values())
+                           if pair_liquidity and pair_real_liquidity.keys() == pair_liquidity.keys() else None),
+        "pair_real_liquidity": pair_real_liquidity,
+        "main_pool": norm(top.get("pairAddress") or ""),
+        "coin_side_share": top_side / float(usd(top)) if top_side is not None and float(usd(top)) > 0 else None,
         "first_pair_ts": min(created) / 1000 if created else None,
     }
 
@@ -976,7 +991,8 @@ def check(addr, chain=None, any_age=False):
                              "Set RPC_" + chain.upper() + " to an archive RPC (most providers' free tiers have one).")
                           if out_of_history else
                           "Couldn't find the mint within 7 days before the first pool, so launch checks were skipped.")
-        return finish(r, rpc, addr, unit, total, burned, None, head, rug_from=None if out_of_history else anchor)
+        return finish(r, rpc, addr, unit, total, burned, None, head, rug_from=None if out_of_history else anchor,
+                      lp_history=not old)
 
     t0 = int(mint["blockNumber"], 16)
     t0_ts = rpc.block_ts(t0)

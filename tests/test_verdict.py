@@ -40,6 +40,13 @@ class VerdictRules(unittest.TestCase):
         self.assertEqual([x["code"] for x in got], ["LP_PULLED", "TOP10_PEOPLE", "FLAG_OTHER"])
         self.assertEqual([x["text"] for x in got], flags)
 
+    def test_real_money_flags_get_codes(self):
+        got = verdict.flag_codes([
+            "The pool is mostly this coin's own tokens; real money in it is about $5,417.",
+            "FDV is $1,000,000 while real money in its pools is $5,417 (185x); that gap is far larger than this liquidity can support.",
+        ])
+        self.assertEqual([x["code"] for x in got], ["COIN_SIDE_POOL", "FAKE_MARKET_CAP"])
+
 
 if __name__ == "__main__":
     unittest.main()

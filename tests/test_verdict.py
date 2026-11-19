@@ -48,5 +48,30 @@ class VerdictRules(unittest.TestCase):
         self.assertEqual([x["code"] for x in got], ["COIN_SIDE_POOL", "FAKE_MARKET_CAP"])
 
 
+class CreatorPullLeads(unittest.TestCase):
+    CLUSTER = "Likely bundle: 6 wallets bought 43.0% of supply within 4 s of trading opening, funded together."
+
+    def note(self, pct):
+        return (f"The creator 0x{'c' * 40} removed {pct:.1%} of pool 0x{'e' * 64}'s peak liquidity positions 26.0h after "
+                "liquidity was first added to that pool, but the pool still shows $2,400 of liquidity (likely held by its "
+                "hook). Check where the liquidity sits.")
+
+    def test_a_creator_full_pull_note_leads_ahead_of_a_cluster_share(self):
+        got = verdict.main_verdict([self.CLUSTER], notes=[self.note(1.0)])
+        self.assertTrue(got.startswith(
+            "Main risk: the creator removed 100% of its liquidity position 26.0h after that pool opened; the pool still shows $2,400 "
+            "(launch-check: likely held by its hook). Next: a group of wallets took a large share at launch"), got)
+
+    def test_a_creator_pull_flag_is_worded_plainly(self):
+        flag = (f"Liquidity pulled: The creator 0x{'c' * 40} removed 95.0% of pool 0x{'e' * 64}'s peak liquidity, 3 min after "
+                "liquidity was first added to that pool. Last removal: tx 0x01")
+        self.assertEqual(verdict.main_verdict([flag]), "Main risk: the creator pulled 95% of the pool's liquidity 3 min after that pool opened.")
+
+    def test_cluster_only_and_a_half_pull_keep_the_old_verdict(self):
+        old = verdict.primary_flag([self.CLUSTER])["verdict"]
+        self.assertEqual(verdict.main_verdict([self.CLUSTER]), old)
+        self.assertEqual(verdict.main_verdict([self.CLUSTER], notes=[self.note(0.5)]), old)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1370,7 +1370,7 @@ def finish(r, rpc, addr, unit, total, burned, t0, head, logs=None, rug_from=None
         contract_traps_cant = [f"Contract trap checks couldn't finish: this RPC refused one of the calls ({type(e).__name__})."]
     r["flags"] = flags(r)
     r["flag_codes"] = verdict.flag_codes(r["flags"])
-    r["verdict"] = verdict.main_verdict(r["flags"], launch_checks_ran=bool(r.get("launch")))
+    r["verdict"] = verdict.main_verdict(r["flags"], launch_checks_ran=bool(r.get("launch")), notes=r["notes"])
     r["cant_check"] = [
         "Funding sent as tokens (USDC/USDT) rather than the native coin.",
         "Funding through a bridge or an exchange withdrawal (the funder then looks like a busy wallet and is skipped).",
@@ -1401,7 +1401,8 @@ def fmt(r):
     m = r.get("market") or {}
     s = r["supply"]
     lines = [f"Launch check: {r['symbol']} on {r['chain']} · {r['address']}"]
-    lines.append(r.get("verdict") or verdict.main_verdict(r.get("flags", []), launch_checks_ran=bool(r.get("launch"))))
+    lines.append(r.get("verdict") or verdict.main_verdict(r.get("flags", []), launch_checks_ran=bool(r.get("launch")),
+                                                          notes=r.get("notes")))
     if m:
         liq = "unknown (DexScreener gives no figure)" if m.get("liquidity") is None else f"${m['liquidity']:,.0f}"
         lines.append(f"Price ${m['price']:.8g} · liquidity {liq} · DexScreener FDV ${m['dex_fdv'] or 0:,.0f}"

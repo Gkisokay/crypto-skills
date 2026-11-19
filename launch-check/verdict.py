@@ -40,6 +40,14 @@ RULES = [
 ]
 
 
+# A pull flags from 50% (launch_check.lp_control_v4); a creator that took at least this share of a pool's peak liquidity
+# leads the verdict, even when it is only a note because the pool still shows liquidity (it may sit in a hook).
+CREATOR_PULL_LEAD = 0.90
+CREATOR_PULL = re.compile(r"^(?:Liquidity pulled: )?The creator \S+ removed (?P<pct>[\d.]+)% of pool \S+'s peak liquidity"
+                          r"(?: positions)?,? (?P<span>.+?) after .+?"
+                          r"(?:, but the pool still shows (?P<shows>\$[\d,]+) of liquidity|\. Last removal)")
+
+
 def _classify(flag_text):
     for rule in RULES:
         if rule.pattern.search(flag_text):
@@ -75,7 +83,26 @@ def primary_flag(flags):
     return {"code": "FLAG_OTHER", "severity": 5, "text": flags[0], "verdict": f"Main risk: {flags[0]}"}
 
 
-def main_verdict(flags, launch_checks_ran=True):
+def creator_pull(flags, notes=()):
+    """The largest creator pull of at least CREATOR_PULL_LEAD, as (percent, match, text), or None; a tie goes to the flag."""
+    pulls = [(float(m["pct"]), m, text) for text in list(flags or []) + list(notes or [])
+             if (m := CREATOR_PULL.match(text))]
+    pulls = [p for p in pulls if p[0] >= CREATOR_PULL_LEAD * 100]
+    return max(pulls, key=lambda p: (p[0], p[1]["shows"] is None)) if pulls else None
+
+
+def main_verdict(flags, launch_checks_ran=True, notes=()):
+    pull = creator_pull(flags, notes)
+    if pull:
+        pct, m, text = pull
+        when = "" if m["span"] == "time unknown" else f" {m['span']} after that pool opened"
+        rest = [f for f in flags or [] if f != text]
+        if m["shows"]:  # the note: the pool still shows liquidity, so it may not have left
+            lead = (f"Main risk: the creator removed {pct:g}% of its liquidity position{when}; the pool still shows "
+                    f"{m['shows']} (launch-check: likely held by its hook).")
+        else:
+            lead = f"Main risk: the creator pulled {pct:g}% of the pool's liquidity{when}."
+        return lead + (" Next: " + primary_flag(rest)["verdict"].removeprefix("Main risk: ") if rest else "")
     if not flags:
         if launch_checks_ran:
             return "No red flags found by these checks; that isn't the same as safe."

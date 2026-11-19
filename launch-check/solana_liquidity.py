@@ -1,15 +1,23 @@
 """Solana liquidity-pull and insider-exit helpers for launch-check."""
 
 import collections
+import functools
+import hashlib
 
 
 SOL_MINT = "So11111111111111111111111111111111111111112"
 PUMP_FUN_CURVE = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
 PUMPSWAP_AMM = "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"
 METEORA_DAMM_V2 = "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG"
+METEORA_DAMM_V2_AUTHORITY = "HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTLcC"  # pool_authority PDA: owns every DAMM v2 pool vault
 METEORA_DLMM = "LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo"
 RAYDIUM_CPMM = "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C"
 RAYDIUM_V4 = "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"
+# Meteora's instructions aren't parsed by RPCs, so removals are matched on their Anchor discriminators (DAMM v2 and DLMM)
+METEORA_REMOVES = {hashlib.sha256(f"global:{name}".encode()).digest()[:8] for name in (
+    "remove_liquidity", "remove_all_liquidity", "remove_liquidity_by_range", "remove_liquidity2",
+    "remove_liquidity_by_range2")}
+B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
 
 def _sig(tx):
@@ -29,17 +37,43 @@ def _time(tx):
     return (tx or {}).get("blockTime") or 0
 
 
+@functools.lru_cache(maxsize=4096)
+def _damm_v2_vault(mint, pool):
+    import solana_check  # imports this module, so it can't be imported at the top
+    return solana_check.pda([b"token_vault", solana_check.b58decode(mint), solana_check.b58decode(pool)], METEORA_DAMM_V2)
+
+
+def _balances(tx, key, pool):
+    """Token balance rows of one side (pre or post); a DAMM v2 vault of `pool` reads as owned by `pool`, since all
+    DAMM v2 vaults share one owner."""
+    keys = _account_keys(tx)
+    out = []
+    for b in ((tx or {}).get("meta") or {}).get(key) or []:
+        owner = b.get("owner")
+        if owner == METEORA_DAMM_V2_AUTHORITY and b.get("mint"):
+            i = b.get("accountIndex")
+            if i is not None and 0 <= i < len(keys) and keys[i] == _damm_v2_vault(b["mint"], pool):
+                owner = pool
+        out.append((owner, b.get("mint"), float((b.get("uiTokenAmount") or {}).get("uiAmount") or 0.0)))
+    return out
+
+
+def _reserve(tx, pool, mint):
+    """(pre, post) of the pool's reserve of `mint` in this tx, or None when the tx doesn't touch that reserve."""
+    seen = False
+    sides = []
+    for key in ("preTokenBalances", "postTokenBalances"):
+        total = 0.0
+        for owner, m, amt in _balances(tx, key, pool):
+            if owner == pool and m == mint:
+                seen = True
+                total += amt
+        sides.append(total)
+    return tuple(sides) if seen else None
+
+
 def _token_balances(tx, owner, mint):
-    meta = (tx or {}).get("meta") or {}
-    pre = 0.0
-    post = 0.0
-    for b in meta.get("preTokenBalances") or []:
-        if b.get("owner") == owner and b.get("mint") == mint:
-            pre += float((b.get("uiTokenAmount") or {}).get("uiAmount") or 0.0)
-    for b in meta.get("postTokenBalances") or []:
-        if b.get("owner") == owner and b.get("mint") == mint:
-            post += float((b.get("uiTokenAmount") or {}).get("uiAmount") or 0.0)
-    return pre, post
+    return _reserve(tx, owner, mint) or (0.0, 0.0)
 
 
 def _account_index(tx, addr):
@@ -99,35 +133,36 @@ def detect_amm(txs):
     return "unknown"
 
 
-def _owner_deltas(tx, mint):
+def _owner_deltas(tx, mint, pool):
     d = collections.Counter()
-    meta = (tx or {}).get("meta") or {}
     for sign, key in ((-1, "preTokenBalances"), (1, "postTokenBalances")):
-        for b in meta.get(key) or []:
-            if b.get("owner") and b.get("mint") == mint:
-                d[b["owner"]] += sign * float((b.get("uiTokenAmount") or {}).get("uiAmount") or 0.0)
+        for owner, m, amt in _balances(tx, key, pool):
+            if owner and m == mint:
+                d[owner] += sign * amt
     return d
 
 
 def _best_quote_mint(mint, pool, txs):
     peaks = {}
     for tx in txs:
-        meta = (tx or {}).get("meta") or {}
         for key in ("preTokenBalances", "postTokenBalances"):
-            for b in meta.get(key) or []:
-                if b.get("owner") != pool:
+            for owner, m, amt in _balances(tx, key, pool):
+                if owner != pool or not m or m == mint:
                     continue
-                m = b.get("mint")
-                if not m or m == mint:
-                    continue
-                amt = float((b.get("uiTokenAmount") or {}).get("uiAmount") or 0.0)
                 peaks[m] = max(peaks.get(m, 0.0), amt)
     if not peaks:
         return None
     return max(peaks, key=lambda m: peaks[m])
 
 
-def _current_quote_balance(call, pool, quote_mint):
+def _current_quote_balance(call, pool, quote_mint, txs):
+    for tx in txs:  # a DAMM v2 pool owns no token accounts: read its quote vault
+        keys = _account_keys(tx)
+        for b in ((tx or {}).get("meta") or {}).get("postTokenBalances") or []:
+            i = b.get("accountIndex")
+            if (b.get("owner") == METEORA_DAMM_V2_AUTHORITY and b.get("mint") == quote_mint and i is not None
+                    and 0 <= i < len(keys) and keys[i] == _damm_v2_vault(quote_mint, pool)):
+                return float((call("getTokenAccountBalance", [keys[i]]).get("value") or {}).get("uiAmount") or 0.0)
     owned = call("getTokenAccountsByOwner", [pool, {"mint": quote_mint}, {"encoding": "jsonParsed"}]).get("value") or []
     total = 0.0
     for row in owned:
@@ -136,17 +171,30 @@ def _current_quote_balance(call, pool, quote_mint):
     return total
 
 
+def _discriminator(data):
+    data = data or ""
+    n = 0
+    for ch in data:
+        if ch not in B58:
+            return b""
+        n = n * 58 + B58.index(ch)
+    raw = n.to_bytes((n.bit_length() + 7) // 8, "big")
+    return (b"\0" * (len(data) - len(data.lstrip("1"))) + raw)[:8]
+
+
 def _is_remove_instruction(ix):
     parsed = ix.get("parsed")
     typ = (parsed.get("type") if isinstance(parsed, dict) else "") or ""
     low = typ.lower()
-    return any(k in low for k in ("remove", "withdraw", "decrease", "burn"))
+    if any(k in low for k in ("remove", "withdraw", "decrease", "burn")):
+        return True
+    return not parsed and _discriminator(ix.get("data")) in METEORA_REMOVES
 
 
 def _is_removal_tx(tx, amm, mint, quote_mint, pool):
     keys = _account_keys(tx)
-    d_base = _owner_deltas(tx, mint)
-    d_quote = _owner_deltas(tx, quote_mint)
+    d_base = _owner_deltas(tx, mint, pool)
+    d_quote = _owner_deltas(tx, quote_mint, pool)
     if d_base.get(pool, 0.0) >= 0 or d_quote.get(pool, 0.0) >= 0:
         receiver = ""
     else:
@@ -205,7 +253,7 @@ def pool_pull_flag(call, mint, pool, launch_txs, max_recent=10):
             biggest = (delta, tx)
     if peak <= 0 or biggest[1] is None:
         return None
-    now = _current_quote_balance(call, pool, quote_mint)
+    now = _current_quote_balance(call, pool, quote_mint, txs)
     if now > peak * 0.05:
         return None
     is_removal, who = _is_removal_tx(biggest[1], amm, mint, quote_mint, pool)

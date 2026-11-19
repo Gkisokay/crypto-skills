@@ -45,6 +45,12 @@ INCREASE_V3 = "0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35
 INITIALIZE_V4 = "0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438"
 MODIFY_V4 = "0xf208f4912782fd25c7f114ca3723a2d5dd6f3bcc3ac8db5af63baa85f711d5ec"
 SWAP_V4 = "0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f"
+# a pool trading: Uniswap v2 Sync and Swap (and forks), v3 Swap, PancakeSwap v3 Swap (two extra protocol-fee fields)
+POOL_TRADE = ["0x1c411e9a96e071241c2f21f7726b17ae89e3cab4c78be50e062b03a9fffbbad1",
+              "0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822",
+              "0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67",
+              "0x19b47279256b2a23a1665c810c8d55a1758940ee09377d4f8d26497a3577dc83"]
+MAX_PRE_POOL_SENDERS = 200
 # Uniswap v4's PoolManager holds every v4 pool's tokens: the only Initialize emitter on each chain, read Nov 17 2026
 # (Elysium's and Robinhood Chain's are v4-style managers too). HyperEVM showed none.
 V4_POOL_MANAGERS = {"ethereum": "0x000000000004444c5dc75cb358380d2e3de08a90",
@@ -1013,6 +1019,21 @@ def check(addr, chain=None, any_age=False):
     swap_from = set((m or {}).get("pairs") or []) | {a for a in (V4_POOL_MANAGERS.get(chain),
                                                                  contract_traps.ROUTER_BY_CHAIN.get(chain)) if a}
     start, log_pool = (first_sale(all_logs, creator, addr, swap_from) or (None, None)) if complete else (None, None)
+    buyers_cant = []
+    if start is not None:
+        # a contract that sold before the listed pool (a bonding curve, an earlier pool, a distributor): its buyers
+        # aren't counted, so say so
+        pre = [("0x" + l["topics"][1][26:], "0x" + l["topics"][2][26:]) for l in all_logs
+               if int(l["blockNumber"], 16) < start]
+        senders = list(dict.fromkeys(f for f, to in pre if f not in (ZERO, creator, addr) and f not in swap_from
+                                     and to not in (ZERO, DEAD, creator, addr)))
+        if len(senders) > MAX_PRE_POOL_SENDERS:
+            buyers_cant.append(f"Early buyers: {len(senders)} wallets sent the coin before the listed pool opened; only "
+                               f"the first {MAX_PRE_POOL_SENDERS} were checked for a contract selling it.")
+        codes = rpc.batch([("eth_getCode", [a, "latest"]) for a in senders[:MAX_PRE_POOL_SENDERS]]) if senders else []
+        if any(wallet_kind(c) == "contract" for c in codes):
+            buyers_cant.append("Early buyers: a contract sold the coin before the listed pool opened (a bonding curve, "
+                               "an earlier pool or a distributor); buyers there aren't counted.")
     if complete and start is None:  # DexScreener doesn't list the pool (new, or delisted): the first seller may be it
         start, log_pool = first_sale(all_logs, creator, addr) or (None, None)
     if start is None:  # too many transfers to replay: fall back to the minutes after the mint
@@ -1029,7 +1050,8 @@ def check(addr, chain=None, any_age=False):
     pre_logs = [l for l in all_logs if int(l["blockNumber"], 16) < start] if complete else []
     cand = sorted({"0x" + l["topics"][2][26:] for l in pre_logs + early_logs} - set(skip) | ({log_pool} if log_pool else set()))
     kinds = dict(zip(cand, (wallet_kind(c) for c in rpc.batch([("eth_getCode", [a, "latest"]) for a in cand]))))
-    if log_pool and kinds.get(log_pool) == "contract":
+    if (log_pool and log_pool not in swap_from and kinds.get(log_pool) == "contract"
+            and rpc.logs({"address": log_pool, "topics": [POOL_TRADE]}, start, min(start + win, head))[0]):
         swap_from.add(log_pool)
     # a contract paid by a swap source (a router, an aggregator) passes the coin on in the same tx: still a buy
     hops, bought = set(), []
@@ -1056,13 +1078,13 @@ def check(addr, chain=None, any_age=False):
     if dropped:
         r["launch"]["airdropped"] = {"count": len(dropped), "share": sum(dropped.values()) / total,
                                      "wallets": [w for w, _ in dropped.most_common(MAX_AIRDROP_WALLETS)]}
-    buyers_cant = []
     if not any("0x" + l["topics"][1][26:] in swap_from for l in (all_logs if complete else early_logs)):
         people = set()
         r["launch"]["early_buyers"] = r["launch"]["early_bought_share"] = None
         buyers_cant.append("Early buyers: no listed pool, v4 PoolManager or router was seen sending the coin (DexScreener "
-                           "doesn't list its pool, and the first wallet that sent it isn't a contract), so who bought "
-                           "in the first minutes couldn't be told from airdrops and wallet-to-wallet sends.")
+                           "doesn't list its pool, and the first wallet that sent it isn't a contract that logged a pool "
+                           "trade), so who bought in the first minutes couldn't be told from airdrops and wallet-to-wallet "
+                           "sends.")
     else:
         r["launch"]["early_buyers"] = len(people)
         # the most early buyers held at once: summing receipts double-counts tokens sold and bought again in the window
@@ -1141,7 +1163,7 @@ def first_sale(logs, creator, token, sources=None):
     skip_to = {ZERO, DEAD, creator, token}
     for l in logs:
         frm, to = "0x" + l["topics"][1][26:], "0x" + l["topics"][2][26:]
-        if frm not in (ZERO, creator) and to not in skip_to and (sources is None or frm in sources):
+        if frm not in (ZERO, creator, token) and to not in skip_to and (sources is None or frm in sources):
             return int(l["blockNumber"], 16), frm
     return None
 

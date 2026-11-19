@@ -515,6 +515,7 @@ class SwapSourcedBuyers(unittest.TestCase):
     MAKER = "0x" + "c1" * 20
     SPRAYER = "0x" + "e1" * 20
     HOP = "0x" + "b0" * 20  # an aggregator or router contract the pool pays first
+    CURVE = "0x" + "c0" * 20  # a launchpad bonding curve DexScreener doesn't list
     POOL_BUYERS = ["0x" + "a%d" % i * 20 for i in range(1, 5)]
     DROPPED = ["0x" + "%04x" % (0xd000 + i) * 10 for i in range(50)]
     HEAD = 2_000_000
@@ -544,7 +545,7 @@ class SwapSourcedBuyers(unittest.TestCase):
         for mod, name, value in self._saved:
             setattr(mod, name, value)
 
-    def run_check(self, transfers, chain="bsc", pairs=None):
+    def run_check(self, transfers, chain="bsc", pairs=None, events=()):
         t = self
         pairs = [t.POOL] if pairs is None else pairs
         balances = {}
@@ -552,7 +553,8 @@ class SwapSourcedBuyers(unittest.TestCase):
             amt = int(l["data"], 16)
             balances["0x" + l["topics"][1][26:]] = balances.get("0x" + l["topics"][1][26:], 0) - amt
             balances["0x" + l["topics"][2][26:]] = balances.get("0x" + l["topics"][2][26:], 0) + amt
-        contracts = {t.POOL, t.TOKEN, t.HOP, cc.V4_POOL_MANAGERS["base"]}
+        contracts = {t.POOL, t.TOKEN, t.HOP, t.CURVE, cc.V4_POOL_MANAGERS["base"]}
+        rows_all = [dict(l, address=t.TOKEN) for l in transfers] + list(events)
 
         class FakeRpc:
             url = "https://rpc.example"
@@ -599,8 +601,9 @@ class SwapSourcedBuyers(unittest.TestCase):
                 return ts
 
             def logs(self, flt, frm, to, cap=None):
-                rows = [l for l in transfers if frm <= int(l["blockNumber"], 16) <= to
-                        and l["topics"][0] == flt["topics"][0]
+                want = lambda v, f: v in f if isinstance(f, list) else v == f
+                rows = [l for l in rows_all if frm <= int(l["blockNumber"], 16) <= to
+                        and want(l["address"], flt["address"]) and want(l["topics"][0], flt["topics"][0])
                         and (len(flt["topics"]) < 2 or l["topics"][1] == flt["topics"][1])]
                 return rows, True
 
@@ -640,10 +643,36 @@ class SwapSourcedBuyers(unittest.TestCase):
                            + [self.log(self.POOL_BUYERS[0], self.DROPPED[0], 10**22, self.MINT + 30)])
         self.assertEqual(r["launch"]["early_buyers"], 4)
 
+    def sync(self, pool, block):
+        return {"address": pool, "blockNumber": hex(block), "transactionHash": "0x" + "9" * 64, "data": "0x",
+                "topics": ["0x1c411e9a96e071241c2f21f7726b17ae89e3cab4c78be50e062b03a9fffbbad1"]}
+
     def test_pool_dexscreener_no_longer_lists_is_taken_from_the_logs(self):
-        r = self.run_check(self.launch() + self.pool_buys(), pairs=[])
+        r = self.run_check(self.launch() + self.pool_buys(), pairs=[], events=[self.sync(self.POOL, self.MINT + 10)])
         self.assertEqual(r["launch"]["early_buyers"], 4)
         self.assertAlmostEqual(r["launch"]["early_bought_share"], 0.08)
+
+    def test_unlisted_contract_with_no_swap_or_sync_is_not_taken_as_the_pool(self):
+        # a distributor contract the creator loaded sends the coin out; it never logged a pool Swap or Sync
+        r = self.run_check(self.launch() + self.pool_buys(), pairs=[])
+        self.assertIsNone(r["launch"]["early_buyers"])
+        self.assertTrue(any("Early buyers" in c for c in r["cant_check"]), r["cant_check"])
+
+    def test_curve_that_sold_before_the_listed_pool_is_disclosed_not_counted(self):
+        # the curve sold first, then graduated into the listed pool: trading still starts at the pool's first sale
+        curve_buys = [self.log(self.CURVE, b, 10**22, self.MINT + 2 + i, tx=str(i)) for i, b in enumerate(self.DROPPED[:3])]
+        r = self.run_check([self.log(cc.ZERO, self.MAKER, 10**24, self.MINT), self.log(self.MAKER, self.CURVE, 8 * 10**23, self.MINT)]
+                           + curve_buys + [self.log(self.CURVE, self.POOL, 6 * 10**23, self.MINT + 8)] + self.pool_buys())
+        self.assertEqual(r["launch"]["first_buy_block"], self.MINT + 10)
+        self.assertEqual(r["launch"]["early_buyers"], 4)
+        self.assertTrue(any("a contract sold the coin before the listed pool opened" in c for c in r["cant_check"]),
+                        r["cant_check"])
+
+    def test_wallet_sending_before_the_pool_adds_no_disclosure(self):
+        r = self.run_check(self.launch() + [self.log(self.MAKER, self.SPRAYER, 10**22, self.MINT),
+                                            self.log(self.SPRAYER, self.DROPPED[0], 10**21, self.MINT + 1)] + self.pool_buys())
+        self.assertEqual(r["launch"]["early_buyers"], 4)
+        self.assertFalse(any("before the listed pool" in c for c in r["cant_check"]), r["cant_check"])
 
     def test_no_pool_seen_sending_is_unknown_not_zero(self):
         spray = [self.log(self.SPRAYER, w, 10**21, self.MINT + 15) for w in self.DROPPED]
@@ -1213,6 +1242,12 @@ class FirstBuy(unittest.TestCase):
         curve, buyer = "0x" + "1" * 40, "0x" + "2" * 40
         logs = [self.log(10, cc.ZERO, curve), self.log(10, curve, CREATOR), self.log(12, curve, buyer)]
         self.assertEqual(cc.first_buy_block(logs, CREATOR, "0x" + "3" * 40), 12)
+
+    def test_token_contract_sending_its_own_coin_is_not_a_sale(self):
+        # tax and reflection tokens move fees out of their own balance; that isn't a pool selling
+        token, pool, buyer = "0x" + "3" * 40, "0x" + "1" * 40, "0x" + "2" * 40
+        logs = [self.log(10, cc.ZERO, CREATOR), self.log(11, token, buyer), self.log(12, pool, buyer)]
+        self.assertEqual(cc.first_sale(logs, CREATOR, token), (12, pool))
 
 
 class Multisend(unittest.TestCase):

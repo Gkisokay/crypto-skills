@@ -514,6 +514,7 @@ class SwapSourcedBuyers(unittest.TestCase):
     POOL = "0x" + "cd" * 20
     MAKER = "0x" + "c1" * 20
     SPRAYER = "0x" + "e1" * 20
+    HOP = "0x" + "b0" * 20  # an aggregator or router contract the pool pays first
     POOL_BUYERS = ["0x" + "a%d" % i * 20 for i in range(1, 5)]
     DROPPED = ["0x" + "%04x" % (0xd000 + i) * 10 for i in range(50)]
     HEAD = 2_000_000
@@ -543,14 +544,15 @@ class SwapSourcedBuyers(unittest.TestCase):
         for mod, name, value in self._saved:
             setattr(mod, name, value)
 
-    def run_check(self, transfers, chain="bsc"):
+    def run_check(self, transfers, chain="bsc", pairs=None):
         t = self
+        pairs = [t.POOL] if pairs is None else pairs
         balances = {}
         for l in transfers:
             amt = int(l["data"], 16)
             balances["0x" + l["topics"][1][26:]] = balances.get("0x" + l["topics"][1][26:], 0) - amt
             balances["0x" + l["topics"][2][26:]] = balances.get("0x" + l["topics"][2][26:], 0) + amt
-        contracts = {t.POOL, t.TOKEN, cc.V4_POOL_MANAGERS["base"]}
+        contracts = {t.POOL, t.TOKEN, t.HOP, cc.V4_POOL_MANAGERS["base"]}
 
         class FakeRpc:
             url = "https://rpc.example"
@@ -604,12 +606,12 @@ class SwapSourcedBuyers(unittest.TestCase):
 
         cc.Rpc = FakeRpc
         cc.market = lambda addr, c: (chain, {"symbol": "DROP", "price": 1.0, "liquidity": 50000.0, "dex_fdv": 1e6,
-                                             "first_pair_ts": t.MINT, "pairs": [t.POOL], "pairs_any": [t.POOL],
-                                             "pair_liquidity": {t.POOL: 50000.0}})
+                                             "first_pair_ts": t.MINT, "pairs": pairs, "pairs_any": pairs,
+                                             "pair_liquidity": {p: 50000.0 for p in pairs}})
         return cc.check(self.TOKEN, chain)
 
-    def log(self, frm, to, amt, block):
-        return {"blockNumber": hex(block), "transactionHash": "0x" + "7" * 64, "data": hex(amt),
+    def log(self, frm, to, amt, block, tx="7"):
+        return {"blockNumber": hex(block), "transactionHash": "0x" + tx * 64, "data": hex(amt),
                 "topics": [cc.TRANSFER, "0x" + "0" * 24 + frm[2:], "0x" + "0" * 24 + to[2:]]}
 
     def launch(self):
@@ -637,6 +639,45 @@ class SwapSourcedBuyers(unittest.TestCase):
         r = self.run_check(self.launch() + self.pool_buys()
                            + [self.log(self.POOL_BUYERS[0], self.DROPPED[0], 10**22, self.MINT + 30)])
         self.assertEqual(r["launch"]["early_buyers"], 4)
+
+    def test_pool_dexscreener_no_longer_lists_is_taken_from_the_logs(self):
+        r = self.run_check(self.launch() + self.pool_buys(), pairs=[])
+        self.assertEqual(r["launch"]["early_buyers"], 4)
+        self.assertAlmostEqual(r["launch"]["early_bought_share"], 0.08)
+
+    def test_no_pool_seen_sending_is_unknown_not_zero(self):
+        spray = [self.log(self.SPRAYER, w, 10**21, self.MINT + 15) for w in self.DROPPED]
+        r = self.run_check(self.launch() + [self.log(self.MAKER, self.SPRAYER, 10**23, self.MINT + 1)] + spray, pairs=[])
+        self.assertIsNone(r["launch"]["early_buyers"])
+        self.assertIsNone(r["launch"]["early_bought_share"])
+        self.assertTrue(any("Early buyers" in c and "pool" in c for c in r["cant_check"]), r["cant_check"])
+        self.assertNotIn("wallets took", cc.fmt(r))
+
+    def test_creator_airdrop_is_reported_apart_from_buys(self):
+        drops = [self.log(self.MAKER, w, 8 * 10**21, self.MINT + 20) for w in self.DROPPED]
+        r = self.run_check(self.launch() + self.pool_buys() + drops)
+        air = r["launch"]["airdropped"]
+        self.assertEqual(sorted(air["wallets"]), sorted(self.DROPPED))
+        self.assertEqual(air["count"], 50)
+        self.assertAlmostEqual(air["share"], 0.4)
+
+    def test_airdrop_list_is_capped(self):
+        many = ["0x" + "%08x" % (0xe0000000 + i) * 5 for i in range(cc.MAX_AIRDROP_WALLETS + 10)]
+        drops = [self.log(self.MAKER, w, 10**20, self.MINT + 20) for w in many]
+        air = self.run_check(self.launch() + self.pool_buys() + drops)["launch"]["airdropped"]
+        self.assertEqual(air["count"], len(many))
+        self.assertEqual(len(air["wallets"]), cc.MAX_AIRDROP_WALLETS)
+
+    def test_buy_through_a_router_contract_in_the_same_tx_counts(self):
+        r = self.run_check(self.launch() + [self.log(self.POOL, self.HOP, 4 * 10**22, self.MINT + 10, tx="8"),
+                                            self.log(self.HOP, self.POOL_BUYERS[0], 4 * 10**22, self.MINT + 10, tx="8")])
+        self.assertEqual(r["launch"]["early_buyers"], 1)
+        self.assertAlmostEqual(r["launch"]["early_bought_share"], 0.04)
+
+    def test_a_send_before_trading_does_not_open_the_window(self):
+        early = [self.log(self.MAKER, self.SPRAYER, 10**23, self.MINT + 1), self.log(self.SPRAYER, self.DROPPED[0], 10**21, self.MINT + 2)]
+        r = self.run_check(self.launch() + early + self.pool_buys())
+        self.assertEqual(r["launch"]["first_buy_block"], self.MINT + 10)
 
     def test_sprayed_transfers_cannot_make_bought_share_pass_100_percent(self):
         # a plain address the token says sent 1,000x the supply to the same wallet list

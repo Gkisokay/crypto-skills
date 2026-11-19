@@ -1017,12 +1017,17 @@ def check(addr, chain=None, any_age=False):
         early_logs = [l for l in all_logs if start <= int(l["blockNumber"], 16) <= start + win]
     else:
         early_logs, _ = rpc.logs({"address": addr, "topics": [TRANSFER]}, start, min(start + win, head))
+    import contract_traps
+    # a buy is the coin leaving one of its pools, the v4 PoolManager or a known router; airdrops and wallet-to-wallet
+    # sends (and Transfer events a token emits from any address it likes) aren't
+    swap_from = set((m or {}).get("pairs") or []) | {a for a in (V4_POOL_MANAGERS.get(chain),
+                                                                 contract_traps.ROUTER_BY_CHAIN.get(chain)) if a}
     recv = collections.Counter()
     first_block = {}
     for l in early_logs:
         blk = int(l["blockNumber"], 16)
-        to = "0x" + l["topics"][2][26:]
-        if to not in (ZERO, DEAD, creator, addr):
+        frm, to = "0x" + l["topics"][1][26:], "0x" + l["topics"][2][26:]
+        if frm in swap_from and to not in (ZERO, DEAD, creator, addr):
             recv[to] += int(l["data"], 16) / unit
             first_block[to] = min(first_block.get(to, blk), blk) if to in first_block else blk
     cand = list(recv)
@@ -1037,7 +1042,7 @@ def check(addr, chain=None, any_age=False):
             out = min(amt, running[frm])
             running[frm] -= out
             live -= out
-        if to in people:
+        if to in people and frm in swap_from:
             running[to] += amt
             live += amt
         peak_held = max(peak_held, live)

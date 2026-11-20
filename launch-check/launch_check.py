@@ -45,6 +45,12 @@ INCREASE_V3 = "0x3067048beee31b25b2f1681f88dac838c8bba36af25bfb2b7cf7473a5847e35
 INITIALIZE_V4 = "0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438"
 MODIFY_V4 = "0xf208f4912782fd25c7f114ca3723a2d5dd6f3bcc3ac8db5af63baa85f711d5ec"
 SWAP_V4 = "0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f"
+# a pool trading: Uniswap v2 Sync and Swap (and forks), v3 Swap, PancakeSwap v3 Swap (two extra protocol-fee fields)
+POOL_TRADE = ["0x1c411e9a96e071241c2f21f7726b17ae89e3cab4c78be50e062b03a9fffbbad1",
+              "0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822",
+              "0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67",
+              "0x19b47279256b2a23a1665c810c8d55a1758940ee09377d4f8d26497a3577dc83"]
+MAX_PRE_POOL_SENDERS = 200
 # Uniswap v4's PoolManager holds every v4 pool's tokens: the only Initialize emitter on each chain, read Nov 17 2026
 # (Elysium's and Robinhood Chain's are v4-style managers too). HyperEVM showed none.
 V4_POOL_MANAGERS = {"ethereum": "0x000000000004444c5dc75cb358380d2e3de08a90",
@@ -77,6 +83,7 @@ BUSY_NONCE = 1000       # a funder that has sent this many txs is likely an exch
 MAX_AGE_DAYS = 7
 MIN_POOL_USD = 1000
 BUNDLE_WINDOW_S = 5
+MAX_AIRDROP_WALLETS = 60  # launch.airdropped keeps the creator's biggest recipients, as many as rug watch reads
 FUNDING_BUDGET_S = 60
 MONO = time.monotonic
 MAX_HUMAN_SPAN_S = 30 * 86400
@@ -1006,7 +1013,29 @@ def check(addr, chain=None, any_age=False):
     win = int(LAUNCH_WINDOW_S / bt)
     all_logs, complete = rpc.logs({"address": addr, "topics": [TRANSFER]}, t0, head, cap=MAX_LOGS)
     holder_logs = all_logs if complete else None  # finish() replays these; None means the scan hit MAX_LOGS
-    start = first_buy_block(all_logs, creator, addr) if complete else None
+    import contract_traps
+    # a buy is the coin leaving one of its pools, the v4 PoolManager or a known router; airdrops and wallet-to-wallet
+    # sends (and Transfer events a token emits from any address it likes) aren't
+    swap_from = set((m or {}).get("pairs") or []) | {a for a in (V4_POOL_MANAGERS.get(chain),
+                                                                 contract_traps.ROUTER_BY_CHAIN.get(chain)) if a}
+    start, log_pool = (first_sale(all_logs, creator, addr, swap_from) or (None, None)) if complete else (None, None)
+    buyers_cant = []
+    if start is not None:
+        # a contract that sent the coin out before the listed pool (a bonding curve, an earlier pool, a distributor):
+        # its buyers aren't counted, so say so; adding liquidity to a pool isn't sending it out
+        pre = [("0x" + l["topics"][1][26:], "0x" + l["topics"][2][26:]) for l in all_logs
+               if int(l["blockNumber"], 16) < start]
+        senders = list(dict.fromkeys(f for f, to in pre if f not in (ZERO, creator, addr) and f not in swap_from
+                                     and to not in (ZERO, DEAD, creator, addr) and to not in swap_from))
+        if len(senders) > MAX_PRE_POOL_SENDERS:
+            buyers_cant.append(f"Early buyers: {len(senders)} wallets sent the coin before the listed pool opened; only "
+                               f"the first {MAX_PRE_POOL_SENDERS} were checked for a contract sending it out.")
+        codes = rpc.batch([("eth_getCode", [a, "latest"]) for a in senders[:MAX_PRE_POOL_SENDERS]]) if senders else []
+        if any(wallet_kind(c) == "contract" for c in codes):
+            buyers_cant.append("Early buyers: a contract sent the coin out before the listed pool opened (a bonding curve, "
+                               "an earlier pool or a distributor); buyers there aren't counted.")
+    if complete and start is None:  # DexScreener doesn't list the pool (new, or delisted): the first seller may be it
+        start, log_pool = first_sale(all_logs, creator, addr) or (None, None)
     if start is None:  # too many transfers to replay: fall back to the minutes after the mint
         start = t0
         all_logs, complete = None, False
@@ -1017,31 +1046,60 @@ def check(addr, chain=None, any_age=False):
         early_logs = [l for l in all_logs if start <= int(l["blockNumber"], 16) <= start + win]
     else:
         early_logs, _ = rpc.logs({"address": addr, "topics": [TRANSFER]}, start, min(start + win, head))
+    skip = (ZERO, DEAD, creator, addr)
+    pre_logs = [l for l in all_logs if int(l["blockNumber"], 16) < start] if complete else []
+    cand = sorted({"0x" + l["topics"][2][26:] for l in pre_logs + early_logs} - set(skip) | ({log_pool} if log_pool else set()))
+    kinds = dict(zip(cand, (wallet_kind(c) for c in rpc.batch([("eth_getCode", [a, "latest"]) for a in cand]))))
+    if (log_pool and log_pool not in swap_from and kinds.get(log_pool) == "contract"
+            and rpc.logs({"address": log_pool, "topics": [POOL_TRADE]}, start, min(start + win, head))[0]):
+        swap_from.add(log_pool)
+    # a contract paid by a swap source (a router, an aggregator) passes the coin on in the same tx: still a buy
+    hops, bought = set(), []
+    for l in early_logs:
+        frm, to = "0x" + l["topics"][1][26:], "0x" + l["topics"][2][26:]
+        swap = frm in swap_from or (l["transactionHash"], frm) in hops
+        if swap and kinds.get(to) == "contract":
+            hops.add((l["transactionHash"], to))
+        bought.append(swap)
     recv = collections.Counter()
     first_block = {}
-    for l in early_logs:
+    for l, swap in zip(early_logs, bought):
         blk = int(l["blockNumber"], 16)
         to = "0x" + l["topics"][2][26:]
-        if to not in (ZERO, DEAD, creator, addr):
+        if swap and to not in skip:
             recv[to] += int(l["data"], 16) / unit
             first_block[to] = min(first_block.get(to, blk), blk) if to in first_block else blk
-    cand = list(recv)
-    codes = rpc.batch([("eth_getCode", [a, "latest"]) for a in cand])
-    people = {a for a, c in zip(cand, codes) if wallet_kind(c).startswith("person")}
-    r["launch"]["early_buyers"] = len(people)
-    # the most early buyers held at once: summing receipts double-counts tokens sold and bought again in the window
-    running, live, peak_held = collections.Counter(), 0.0, 0.0
-    for l in early_logs:
-        frm, to, amt = "0x" + l["topics"][1][26:], "0x" + l["topics"][2][26:], int(l["data"], 16) / unit
-        if frm in people:
-            out = min(amt, running[frm])
-            running[frm] -= out
-            live -= out
-        if to in people:
-            running[to] += amt
-            live += amt
-        peak_held = max(peak_held, live)
-    r["launch"]["early_bought_share"] = peak_held / total if total else 0
+    people = {a for a in recv if kinds.get(a, "").startswith("person")}
+    dropped = collections.Counter()
+    for l in pre_logs + early_logs:
+        to = "0x" + l["topics"][2][26:]
+        if "0x" + l["topics"][1][26:] == creator and kinds.get(to, "").startswith("person"):
+            dropped[to] += int(l["data"], 16) / unit
+    if dropped:
+        r["launch"]["airdropped"] = {"count": len(dropped), "share": sum(dropped.values()) / total,
+                                     "wallets": [w for w, _ in dropped.most_common(MAX_AIRDROP_WALLETS)]}
+    if not any("0x" + l["topics"][1][26:] in swap_from for l in (all_logs if complete else early_logs)):
+        people = set()
+        r["launch"]["early_buyers"] = r["launch"]["early_bought_share"] = None
+        buyers_cant.append("Early buyers: no listed pool, v4 PoolManager or router was seen sending the coin (DexScreener "
+                           "doesn't list its pool, and the first wallet that sent it isn't a contract that logged a pool "
+                           "trade), so who bought in the first minutes couldn't be told from airdrops and wallet-to-wallet "
+                           "sends.")
+    else:
+        r["launch"]["early_buyers"] = len(people)
+        # the most early buyers held at once: summing receipts double-counts tokens sold and bought again in the window
+        running, live, peak_held = collections.Counter(), 0.0, 0.0
+        for l, swap in zip(early_logs, bought):
+            frm, to, amt = "0x" + l["topics"][1][26:], "0x" + l["topics"][2][26:], int(l["data"], 16) / unit
+            if frm in people:
+                out = min(amt, running[frm])
+                running[frm] -= out
+                live -= out
+            if to in people and swap:
+                running[to] += amt
+                live += amt
+            peak_held = max(peak_held, live)
+        r["launch"]["early_bought_share"] = peak_held / total if total else 0
     if people:
         open_ts = t0_ts if start == t0 else r["launch"]["first_buy_ts"]
         blocks = sorted({first_block[a] for a in people if a in first_block})
@@ -1094,19 +1152,25 @@ def check(addr, chain=None, any_age=False):
         sys.modules[__name__], rpc, r, addr, mint["transactionHash"], t0, t0_ts, head, unit, total, holder_logs
     )
     out = finish(r, rpc, addr, unit, total, burned, t0, head, holder_logs, too_many=holder_logs is None, lp_history=not old)
-    out["cant_check"] += [x for x in creator_cant if x not in out["cant_check"]]
+    out["cant_check"] += [x for x in creator_cant + buyers_cant if x not in out["cant_check"]]
     return out
 
 
-def first_buy_block(logs, creator, token):
-    """First block where tokens leave a pool or curve for someone other than the creator: when trading opened.
+def first_sale(logs, creator, token, sources=None):
+    """(block, sender) of the first transfer out of a pool or curve to someone other than the creator: when trading
+    opened. With sources, only those senders count, so an airdrop before the first swap doesn't open the window.
     On Ethereum a token is often minted hours before liquidity is added, so the mint block is the wrong start."""
     skip_to = {ZERO, DEAD, creator, token}
     for l in logs:
         frm, to = "0x" + l["topics"][1][26:], "0x" + l["topics"][2][26:]
-        if frm not in (ZERO, creator) and to not in skip_to:
-            return int(l["blockNumber"], 16)
+        if frm not in (ZERO, creator, token) and to not in skip_to and (sources is None or frm in sources):
+            return int(l["blockNumber"], 16), frm
     return None
+
+
+def first_buy_block(logs, creator, token):
+    hit = first_sale(logs, creator, token)
+    return hit[0] if hit else None
 
 
 def first_funders(rpc, wallets, t0, end, bt, r):

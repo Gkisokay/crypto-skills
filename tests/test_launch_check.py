@@ -506,6 +506,234 @@ class AnyAge(unittest.TestCase):
         self.assertEqual(seen, [(self.TOKEN, "base", True), (self.TOKEN, None, False)])
 
 
+class SwapSourcedBuyers(unittest.TestCase):
+    """Early buyers are wallets that got the coin from one of its pools or a known router: an airdrop or a
+    wallet-to-wallet send isn't a buy. Shape of the stored BSC case (Nov 19): a fresh coin, a few pool buys, then the
+    same list of wallets sent the coin by a plain address, which made a 1,377-wallet 'bundle' that took 4,692.7%."""
+    TOKEN = "0x" + "ab" * 20
+    POOL = "0x" + "cd" * 20
+    MAKER = "0x" + "c1" * 20
+    SPRAYER = "0x" + "e1" * 20
+    HOP = "0x" + "b0" * 20  # an aggregator or router contract the pool pays first
+    CURVE = "0x" + "c0" * 20  # a launchpad bonding curve DexScreener doesn't list
+    FACTORY = "0x" + "fa" * 20  # a launchpad factory that mints the coin and adds the pool
+    SAFE = "0x" + "5a" * 20  # a team multisig
+    POOL_BUYERS = ["0x" + "a%d" % i * 20 for i in range(1, 5)]
+    DROPPED = ["0x" + "%04x" % (0xd000 + i) * 10 for i in range(50)]
+    HEAD = 2_000_000
+    MINT = HEAD - 3600
+
+    def setUp(self):
+        import contract_traps
+        import creator
+        import snipers
+        self._saved = [(cc, n, getattr(cc, n)) for n in ("Rpc", "market", "gt_holders", "first_funders", "lp_control",
+                                                          "lp_control_v4", "liquidity_pulls")]
+        self._saved += [(creator, "add_evm_creator_checks", creator.add_evm_creator_checks),
+                        (snipers, "evm_wallet_profiles", snipers.evm_wallet_profiles),
+                        (cc.holder_patterns, "evm_holder_pattern_flags", cc.holder_patterns.evm_holder_pattern_flags),
+                        (contract_traps, "check_contract_traps", contract_traps.check_contract_traps)]
+        cc.gt_holders = lambda chain, addr: None
+        cc.first_funders = lambda rpc, wallets, t0, end, bt, r: ([], 0)
+        cc.lp_control = lambda *a, **k: ([], [])
+        cc.lp_control_v4 = lambda *a, **k: ([], [])
+        cc.liquidity_pulls = lambda *a, **k: []
+        creator.add_evm_creator_checks = lambda *a, **k: []
+        snipers.evm_wallet_profiles = lambda rpc, wallets: {}
+        cc.holder_patterns.evm_holder_pattern_flags = lambda *a, **k: ([], [])
+        contract_traps.check_contract_traps = lambda *a, **k: {}
+
+    def tearDown(self):
+        for mod, name, value in self._saved:
+            setattr(mod, name, value)
+
+    def run_check(self, transfers, chain="bsc", pairs=None, events=()):
+        t = self
+        pairs = [t.POOL] if pairs is None else pairs
+        balances = {}
+        for l in transfers:
+            amt = int(l["data"], 16)
+            balances["0x" + l["topics"][1][26:]] = balances.get("0x" + l["topics"][1][26:], 0) - amt
+            balances["0x" + l["topics"][2][26:]] = balances.get("0x" + l["topics"][2][26:], 0) + amt
+        contracts = {t.POOL, t.TOKEN, t.HOP, t.CURVE, t.FACTORY, t.SAFE, cc.V4_POOL_MANAGERS["base"]}
+        rows_all = [dict(l, address=t.TOKEN) for l in transfers] + list(events)
+
+        class FakeRpc:
+            url = "https://rpc.example"
+            chunk = 50000
+
+            def __init__(self, *a):
+                pass
+
+            def eth_call(self, to, data):
+                if data == "0x313ce567":
+                    return "0x12"
+                if data == "0x18160ddd":
+                    return hex(10**24)
+                if data.startswith("0x70a08231"):
+                    return hex(max(balances.get("0x" + data[-40:], 0), 0))
+                raise AssertionError((to, data))
+
+            def batch(self, calls, deadline=None):
+                out = []
+                for m, p in calls:
+                    if m == "eth_call":
+                        out.append(hex(max(balances.get("0x" + p[0]["data"][-40:], 0), 0)))
+                    elif m == "eth_getCode":
+                        out.append("0x6080" if p[0] in contracts else "0x")
+                    elif m == "eth_getBlockByNumber":
+                        out.append({"timestamp": p[0]})
+                    elif m == "eth_getTransactionCount":
+                        out.append("0x5")
+                    else:
+                        raise AssertionError((m, p))
+                return out
+
+            def call(self, method, params, deadline=None):
+                if method == "eth_blockNumber":
+                    return hex(t.HEAD)
+                if method == "eth_getTransactionByHash":
+                    return {"from": t.MAKER}
+                raise AssertionError((method, params))
+
+            def block_ts(self, n):
+                return n
+
+            def block_at(self, ts, head, head_ts, bt):
+                return ts
+
+            def logs(self, flt, frm, to, cap=None):
+                want = lambda v, f: v in f if isinstance(f, list) else v == f
+                rows = [l for l in rows_all if frm <= int(l["blockNumber"], 16) <= to
+                        and want(l["address"], flt["address"]) and want(l["topics"][0], flt["topics"][0])
+                        and (len(flt["topics"]) < 2 or l["topics"][1] == flt["topics"][1])]
+                return rows, True
+
+        cc.Rpc = FakeRpc
+        cc.market = lambda addr, c: (chain, {"symbol": "DROP", "price": 1.0, "liquidity": 50000.0, "dex_fdv": 1e6,
+                                             "first_pair_ts": t.MINT, "pairs": pairs, "pairs_any": pairs,
+                                             "pair_liquidity": {p: 50000.0 for p in pairs}})
+        return cc.check(self.TOKEN, chain)
+
+    def log(self, frm, to, amt, block, tx="7"):
+        return {"blockNumber": hex(block), "transactionHash": "0x" + tx * 64, "data": hex(amt),
+                "topics": [cc.TRANSFER, "0x" + "0" * 24 + frm[2:], "0x" + "0" * 24 + to[2:]]}
+
+    def launch(self):
+        return [self.log(cc.ZERO, self.MAKER, 10**24, self.MINT), self.log(self.MAKER, self.POOL, 6 * 10**23, self.MINT)]
+
+    def pool_buys(self):
+        return [self.log(self.POOL, b, 2 * 10**22, self.MINT + 10 + i) for i, b in enumerate(self.POOL_BUYERS)]
+
+    def test_creator_airdrop_to_50_wallets_adds_no_early_buyers(self):
+        drops = [self.log(self.MAKER, w, 8 * 10**21, self.MINT + 20) for w in self.DROPPED]
+        r = self.run_check(self.launch() + self.pool_buys() + drops)
+        self.assertEqual(r["launch"]["early_buyers"], 4)
+        self.assertAlmostEqual(r["launch"]["early_bought_share"], 0.08)
+        self.assertFalse(any(w in g["wallets"] for g in r.get("bundles", []) for w in self.DROPPED), r.get("bundles"))
+
+    def test_pool_and_router_sourced_buys_count(self):
+        manager = cc.V4_POOL_MANAGERS["base"]
+        r = self.run_check(self.launch() + self.pool_buys()[:2]
+                           + [self.log(self.POOL, manager, 2 * 10**22, self.MINT + 12)]
+                           + [self.log(manager, b, 10**22, self.MINT + 13) for b in self.POOL_BUYERS[2:]], chain="base")
+        self.assertEqual(r["launch"]["early_buyers"], 4)
+        self.assertAlmostEqual(r["launch"]["early_bought_share"], 0.06)
+
+    def test_wallet_to_wallet_send_is_not_a_buy(self):
+        r = self.run_check(self.launch() + self.pool_buys()
+                           + [self.log(self.POOL_BUYERS[0], self.DROPPED[0], 10**22, self.MINT + 30)])
+        self.assertEqual(r["launch"]["early_buyers"], 4)
+
+    def sync(self, pool, block):
+        return {"address": pool, "blockNumber": hex(block), "transactionHash": "0x" + "9" * 64, "data": "0x",
+                "topics": ["0x1c411e9a96e071241c2f21f7726b17ae89e3cab4c78be50e062b03a9fffbbad1"]}
+
+    def test_pool_dexscreener_no_longer_lists_is_taken_from_the_logs(self):
+        r = self.run_check(self.launch() + self.pool_buys(), pairs=[], events=[self.sync(self.POOL, self.MINT + 10)])
+        self.assertEqual(r["launch"]["early_buyers"], 4)
+        self.assertAlmostEqual(r["launch"]["early_bought_share"], 0.08)
+
+    def test_unlisted_contract_with_no_swap_or_sync_is_not_taken_as_the_pool(self):
+        # a distributor contract the creator loaded sends the coin out; it never logged a pool Swap or Sync
+        r = self.run_check(self.launch() + self.pool_buys(), pairs=[])
+        self.assertIsNone(r["launch"]["early_buyers"])
+        self.assertTrue(any("Early buyers" in c for c in r["cant_check"]), r["cant_check"])
+
+    def test_curve_that_sold_before_the_listed_pool_is_disclosed_not_counted(self):
+        # the curve sold first, then graduated into the listed pool: trading still starts at the pool's first sale
+        curve_buys = [self.log(self.CURVE, b, 10**22, self.MINT + 2 + i, tx=str(i)) for i, b in enumerate(self.DROPPED[:3])]
+        r = self.run_check([self.log(cc.ZERO, self.MAKER, 10**24, self.MINT), self.log(self.MAKER, self.CURVE, 8 * 10**23, self.MINT)]
+                           + curve_buys + [self.log(self.CURVE, self.POOL, 6 * 10**23, self.MINT + 8)] + self.pool_buys())
+        self.assertEqual(r["launch"]["first_buy_block"], self.MINT + 10)
+        self.assertEqual(r["launch"]["early_buyers"], 4)
+        self.assertIn(self.EARLIER_SENDER, r["cant_check"])
+
+    EARLIER_SENDER = ("Early buyers: a contract sent the coin out before the listed pool opened (a bonding curve, an "
+                      "earlier pool or a distributor); buyers there aren't counted.")
+
+    def test_factory_adding_the_pool_before_the_first_trade_adds_no_disclosure(self):
+        # Clanker-style: the factory mints, adds the pool a block before anyone trades, no dev buy
+        r = self.run_check([self.log(cc.ZERO, self.FACTORY, 10**24, self.MINT),
+                            self.log(self.FACTORY, self.POOL, 10**24, self.MINT + 1)] + self.pool_buys())
+        self.assertEqual(r["launch"]["early_buyers"], 4)
+        self.assertFalse(any("before the listed pool" in c for c in r["cant_check"]), r["cant_check"])
+
+    def test_safe_adding_liquidity_adds_no_disclosure(self):
+        r = self.run_check([self.log(cc.ZERO, self.MAKER, 10**24, self.MINT), self.log(self.MAKER, self.SAFE, 6 * 10**23, self.MINT),
+                            self.log(self.SAFE, self.POOL, 6 * 10**23, self.MINT + 1)] + self.pool_buys())
+        self.assertEqual(r["launch"]["early_buyers"], 4)
+        self.assertFalse(any("before the listed pool" in c for c in r["cant_check"]), r["cant_check"])
+
+    def test_wallet_sending_before_the_pool_adds_no_disclosure(self):
+        r = self.run_check(self.launch() + [self.log(self.MAKER, self.SPRAYER, 10**22, self.MINT),
+                                            self.log(self.SPRAYER, self.DROPPED[0], 10**21, self.MINT + 1)] + self.pool_buys())
+        self.assertEqual(r["launch"]["early_buyers"], 4)
+        self.assertFalse(any("before the listed pool" in c for c in r["cant_check"]), r["cant_check"])
+
+    def test_no_pool_seen_sending_is_unknown_not_zero(self):
+        spray = [self.log(self.SPRAYER, w, 10**21, self.MINT + 15) for w in self.DROPPED]
+        r = self.run_check(self.launch() + [self.log(self.MAKER, self.SPRAYER, 10**23, self.MINT + 1)] + spray, pairs=[])
+        self.assertIsNone(r["launch"]["early_buyers"])
+        self.assertIsNone(r["launch"]["early_bought_share"])
+        self.assertTrue(any("Early buyers" in c and "pool" in c for c in r["cant_check"]), r["cant_check"])
+        self.assertNotIn("wallets took", cc.fmt(r))
+
+    def test_creator_airdrop_is_reported_apart_from_buys(self):
+        drops = [self.log(self.MAKER, w, 8 * 10**21, self.MINT + 20) for w in self.DROPPED]
+        r = self.run_check(self.launch() + self.pool_buys() + drops)
+        air = r["launch"]["airdropped"]
+        self.assertEqual(sorted(air["wallets"]), sorted(self.DROPPED))
+        self.assertEqual(air["count"], 50)
+        self.assertAlmostEqual(air["share"], 0.4)
+
+    def test_airdrop_list_is_capped(self):
+        many = ["0x" + "%08x" % (0xe0000000 + i) * 5 for i in range(cc.MAX_AIRDROP_WALLETS + 10)]
+        drops = [self.log(self.MAKER, w, 10**20, self.MINT + 20) for w in many]
+        air = self.run_check(self.launch() + self.pool_buys() + drops)["launch"]["airdropped"]
+        self.assertEqual(air["count"], len(many))
+        self.assertEqual(len(air["wallets"]), cc.MAX_AIRDROP_WALLETS)
+
+    def test_buy_through_a_router_contract_in_the_same_tx_counts(self):
+        r = self.run_check(self.launch() + [self.log(self.POOL, self.HOP, 4 * 10**22, self.MINT + 10, tx="8"),
+                                            self.log(self.HOP, self.POOL_BUYERS[0], 4 * 10**22, self.MINT + 10, tx="8")])
+        self.assertEqual(r["launch"]["early_buyers"], 1)
+        self.assertAlmostEqual(r["launch"]["early_bought_share"], 0.04)
+
+    def test_a_send_before_trading_does_not_open_the_window(self):
+        early = [self.log(self.MAKER, self.SPRAYER, 10**23, self.MINT + 1), self.log(self.SPRAYER, self.DROPPED[0], 10**21, self.MINT + 2)]
+        r = self.run_check(self.launch() + early + self.pool_buys())
+        self.assertEqual(r["launch"]["first_buy_block"], self.MINT + 10)
+
+    def test_sprayed_transfers_cannot_make_bought_share_pass_100_percent(self):
+        # a plain address the token says sent 1,000x the supply to the same wallet list
+        spray = [self.log(self.SPRAYER, w, 10**27 // 50, self.MINT + 15) for w in self.DROPPED]
+        r = self.run_check(self.launch() + self.pool_buys() + spray)
+        self.assertLessEqual(r["launch"]["early_bought_share"], 1.0)
+        self.assertEqual(r["launch"]["early_buyers"], 4)
+        self.assertEqual(r.get("bundles"), [])
+
+
 class MintMissingRugChecks(unittest.TestCase):
     def test_rug_checks_run_when_mint_missing_but_pool_block_known(self):
         token = "0x" + "ab" * 20
@@ -1031,6 +1259,12 @@ class FirstBuy(unittest.TestCase):
         curve, buyer = "0x" + "1" * 40, "0x" + "2" * 40
         logs = [self.log(10, cc.ZERO, curve), self.log(10, curve, CREATOR), self.log(12, curve, buyer)]
         self.assertEqual(cc.first_buy_block(logs, CREATOR, "0x" + "3" * 40), 12)
+
+    def test_token_contract_sending_its_own_coin_is_not_a_sale(self):
+        # tax and reflection tokens move fees out of their own balance; that isn't a pool selling
+        token, pool, buyer = "0x" + "3" * 40, "0x" + "1" * 40, "0x" + "2" * 40
+        logs = [self.log(10, cc.ZERO, CREATOR), self.log(11, token, buyer), self.log(12, pool, buyer)]
+        self.assertEqual(cc.first_sale(logs, CREATOR, token), (12, pool))
 
 
 class Multisend(unittest.TestCase):

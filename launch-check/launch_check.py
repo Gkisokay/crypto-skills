@@ -1021,18 +1021,18 @@ def check(addr, chain=None, any_age=False):
     start, log_pool = (first_sale(all_logs, creator, addr, swap_from) or (None, None)) if complete else (None, None)
     buyers_cant = []
     if start is not None:
-        # a contract that sold before the listed pool (a bonding curve, an earlier pool, a distributor): its buyers
-        # aren't counted, so say so
+        # a contract that sent the coin out before the listed pool (a bonding curve, an earlier pool, a distributor):
+        # its buyers aren't counted, so say so; adding liquidity to a pool isn't sending it out
         pre = [("0x" + l["topics"][1][26:], "0x" + l["topics"][2][26:]) for l in all_logs
                if int(l["blockNumber"], 16) < start]
         senders = list(dict.fromkeys(f for f, to in pre if f not in (ZERO, creator, addr) and f not in swap_from
-                                     and to not in (ZERO, DEAD, creator, addr)))
+                                     and to not in (ZERO, DEAD, creator, addr) and to not in swap_from))
         if len(senders) > MAX_PRE_POOL_SENDERS:
             buyers_cant.append(f"Early buyers: {len(senders)} wallets sent the coin before the listed pool opened; only "
-                               f"the first {MAX_PRE_POOL_SENDERS} were checked for a contract selling it.")
+                               f"the first {MAX_PRE_POOL_SENDERS} were checked for a contract sending it out.")
         codes = rpc.batch([("eth_getCode", [a, "latest"]) for a in senders[:MAX_PRE_POOL_SENDERS]]) if senders else []
         if any(wallet_kind(c) == "contract" for c in codes):
-            buyers_cant.append("Early buyers: a contract sold the coin before the listed pool opened (a bonding curve, "
+            buyers_cant.append("Early buyers: a contract sent the coin out before the listed pool opened (a bonding curve, "
                                "an earlier pool or a distributor); buyers there aren't counted.")
     if complete and start is None:  # DexScreener doesn't list the pool (new, or delisted): the first seller may be it
         start, log_pool = first_sale(all_logs, creator, addr) or (None, None)

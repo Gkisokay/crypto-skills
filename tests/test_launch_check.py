@@ -516,6 +516,8 @@ class SwapSourcedBuyers(unittest.TestCase):
     SPRAYER = "0x" + "e1" * 20
     HOP = "0x" + "b0" * 20  # an aggregator or router contract the pool pays first
     CURVE = "0x" + "c0" * 20  # a launchpad bonding curve DexScreener doesn't list
+    FACTORY = "0x" + "fa" * 20  # a launchpad factory that mints the coin and adds the pool
+    SAFE = "0x" + "5a" * 20  # a team multisig
     POOL_BUYERS = ["0x" + "a%d" % i * 20 for i in range(1, 5)]
     DROPPED = ["0x" + "%04x" % (0xd000 + i) * 10 for i in range(50)]
     HEAD = 2_000_000
@@ -553,7 +555,7 @@ class SwapSourcedBuyers(unittest.TestCase):
             amt = int(l["data"], 16)
             balances["0x" + l["topics"][1][26:]] = balances.get("0x" + l["topics"][1][26:], 0) - amt
             balances["0x" + l["topics"][2][26:]] = balances.get("0x" + l["topics"][2][26:], 0) + amt
-        contracts = {t.POOL, t.TOKEN, t.HOP, t.CURVE, cc.V4_POOL_MANAGERS["base"]}
+        contracts = {t.POOL, t.TOKEN, t.HOP, t.CURVE, t.FACTORY, t.SAFE, cc.V4_POOL_MANAGERS["base"]}
         rows_all = [dict(l, address=t.TOKEN) for l in transfers] + list(events)
 
         class FakeRpc:
@@ -665,8 +667,23 @@ class SwapSourcedBuyers(unittest.TestCase):
                            + curve_buys + [self.log(self.CURVE, self.POOL, 6 * 10**23, self.MINT + 8)] + self.pool_buys())
         self.assertEqual(r["launch"]["first_buy_block"], self.MINT + 10)
         self.assertEqual(r["launch"]["early_buyers"], 4)
-        self.assertTrue(any("a contract sold the coin before the listed pool opened" in c for c in r["cant_check"]),
-                        r["cant_check"])
+        self.assertIn(self.EARLIER_SENDER, r["cant_check"])
+
+    EARLIER_SENDER = ("Early buyers: a contract sent the coin out before the listed pool opened (a bonding curve, an "
+                      "earlier pool or a distributor); buyers there aren't counted.")
+
+    def test_factory_adding_the_pool_before_the_first_trade_adds_no_disclosure(self):
+        # Clanker-style: the factory mints, adds the pool a block before anyone trades, no dev buy
+        r = self.run_check([self.log(cc.ZERO, self.FACTORY, 10**24, self.MINT),
+                            self.log(self.FACTORY, self.POOL, 10**24, self.MINT + 1)] + self.pool_buys())
+        self.assertEqual(r["launch"]["early_buyers"], 4)
+        self.assertFalse(any("before the listed pool" in c for c in r["cant_check"]), r["cant_check"])
+
+    def test_safe_adding_liquidity_adds_no_disclosure(self):
+        r = self.run_check([self.log(cc.ZERO, self.MAKER, 10**24, self.MINT), self.log(self.MAKER, self.SAFE, 6 * 10**23, self.MINT),
+                            self.log(self.SAFE, self.POOL, 6 * 10**23, self.MINT + 1)] + self.pool_buys())
+        self.assertEqual(r["launch"]["early_buyers"], 4)
+        self.assertFalse(any("before the listed pool" in c for c in r["cant_check"]), r["cant_check"])
 
     def test_wallet_sending_before_the_pool_adds_no_disclosure(self):
         r = self.run_check(self.launch() + [self.log(self.MAKER, self.SPRAYER, 10**22, self.MINT),

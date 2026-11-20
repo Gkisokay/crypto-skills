@@ -1,3 +1,4 @@
+import collections
 import sys
 import unittest
 import json
@@ -1152,6 +1153,123 @@ class Solana(unittest.TestCase):
         bought, _, _, _, _, held = sc.early_flows(txs, "M", kinds, 100)
         self.assertEqual((bought[w1], bought[w2]), (100.0, 50.0))  # what each really bought, unscaled
         self.assertEqual(held, 100.0)  # the most held at once never exceeds what left the pool
+
+
+class SolanaPagedLaunchReads(unittest.TestCase):
+    """The launch window's transactions read from getTransactionsForAddress pages match single getTransaction reads."""
+    HELIUS = "https://mainnet.helius-rpc.com/?api-key=x"
+    OPTS = {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 1}
+
+    def chain(self, n=320, t0=1000):
+        # synthetic launch: bursts of up to 7 transactions sharing a second (so pages split seconds), every 5th one
+        # failed, spread past the 180 s window
+        txs = []
+        for i in range(n):
+            t = t0 + (i * 230) // n
+            err = {"InstructionError": [0, {"Custom": 6001}]} if i % 5 == 3 else None
+            txs.append({"slot": 500 + i // 3, "blockTime": t,
+                        "meta": {"err": err, "preTokenBalances": [], "postTokenBalances": [
+                            {"owner": f"w{i % 37}", "mint": "M", "uiTokenAmount": {"uiAmount": float(i + 1)}}]},
+                        "transaction": {"signatures": [f"sig{i:04d}"], "message": {"accountKeys": [f"w{i % 37}"]}}})
+        return txs
+
+    def helius(self, txs, honor_status=True, missing=(), page_error=False):
+        by_sig = {tx["transaction"]["signatures"][0]: tx for tx in txs}
+        counts = collections.Counter()
+
+        def call(method, params):
+            counts[method] += 1
+            if method == "getTransaction":
+                self.assertEqual(params[1], self.OPTS)
+                return None if params[0] in missing else by_sig.get(params[0])
+            if method != "getTransactionsForAddress":
+                raise AssertionError((method, params))
+            opts = params[1]
+            if opts.get("transactionDetails") == "full" and page_error:
+                raise RuntimeError("getTransactionsForAddress: boom")
+            rows = sorted(txs, key=lambda t: (t["slot"], t["transaction"]["signatures"][0]),
+                          reverse=opts.get("sortOrder") == "desc")
+            f = opts.get("filters") or {}
+            bt = f.get("blockTime") or {}
+            rows = [t for t in rows if bt.get("gte", -1) <= t["blockTime"] <= bt.get("lte", 10**12)]
+            if honor_status and f.get("status") == "succeeded":
+                rows = [t for t in rows if not t["meta"]["err"]]
+            start = int(opts.get("paginationToken") or 0)
+            part = rows[start:start + opts["limit"]]
+            nxt = str(start + opts["limit"]) if start + opts["limit"] < len(rows) else None
+            if opts["transactionDetails"] == "signatures":
+                part = [{"signature": t["transaction"]["signatures"][0], "slot": t["slot"], "blockTime": t["blockTime"],
+                         "err": t["meta"]["err"]} for t in part]
+            else:
+                part = [t for t in part if t["transaction"]["signatures"][0] not in missing]
+                self.assertEqual({k: opts[k] for k in self.OPTS}, self.OPTS)
+            return {"data": part, "paginationToken": nxt}
+        return call, counts
+
+    def window(self, sc, call):
+        sigs, _ = sc.launch_sigs(call, self.HELIUS, "M")
+        t0 = sigs[0]["blockTime"]
+        return [s for s in sigs if (s.get("blockTime") or t0) <= t0 + cc.LAUNCH_WINDOW_S][:sc.MAX_EARLY_TXS]
+
+    def singles(self, call, early):
+        return [call("getTransaction", [s["signature"], self.OPTS]) for s in early]
+
+    def test_pages_return_the_same_transactions_with_far_fewer_requests(self):
+        import solana_check as sc
+        call, counts = self.helius(self.chain())
+        early = self.window(sc, call)
+        self.assertEqual(len(early), sc.MAX_EARLY_TXS)  # more than one page of successful transactions in the window
+        want = self.singles(call, early)
+        counts.clear()
+        self.assertEqual(sc.launch_txs(call, self.HELIUS, "M", early), want)
+        self.assertEqual(counts["getTransaction"], 0)
+        self.assertLessEqual(counts["getTransactionsForAddress"], 2)
+
+    def test_window_cutoff_inside_the_cap_stops_at_the_window(self):
+        import solana_check as sc
+        call, counts = self.helius(self.chain(n=200))  # ~125 successful in 180 s, more after the cutoff
+        early = self.window(sc, call)
+        self.assertLess(len(early), sc.MAX_EARLY_TXS)
+        self.assertGreater(len(early), 100)
+        self.assertLessEqual(early[-1]["blockTime"], early[0]["blockTime"] + cc.LAUNCH_WINDOW_S)
+        want = self.singles(call, early)
+        counts.clear()
+        self.assertEqual(sc.launch_txs(call, self.HELIUS, "M", early), want)
+        self.assertEqual(counts["getTransaction"], 0)
+        self.assertLessEqual(counts["getTransactionsForAddress"], 2)
+
+    def test_failed_transactions_on_pages_are_dropped_as_the_signature_list_drops_them(self):
+        import solana_check as sc
+        call, _ = self.helius(self.chain())
+        early = self.window(sc, call)
+        want = self.singles(call, early)
+        lax, counts = self.helius(self.chain(), honor_status=False)  # pages that ignore the status filter
+        got = sc.launch_txs(lax, self.HELIUS, "M", early)
+        self.assertEqual(got, want)
+        self.assertFalse(any(tx["meta"]["err"] for tx in got))
+        self.assertLessEqual(counts["getTransactionsForAddress"], 4)
+
+    def test_a_transaction_missing_from_the_pages_is_read_on_its_own(self):
+        import solana_check as sc
+        call, _ = self.helius(self.chain())
+        early = self.window(sc, call)
+        gone = {early[7]["signature"], early[120]["signature"]}
+        want = self.singles(self.helius(self.chain(), missing=gone)[0], early)
+        holey, counts = self.helius(self.chain(), missing=gone)
+        self.assertEqual(sc.launch_txs(holey, self.HELIUS, "M", early), want)
+        self.assertEqual(counts["getTransaction"], 2)
+
+    def test_page_errors_and_other_rpcs_fall_back_to_single_reads(self):
+        import solana_check as sc
+        call, _ = self.helius(self.chain())
+        early = self.window(sc, call)
+        want = self.singles(call, early)
+        broken, counts = self.helius(self.chain(), page_error=True)
+        self.assertEqual(sc.launch_txs(broken, self.HELIUS, "M", early), want)
+        self.assertEqual(counts["getTransaction"], len(early))
+        other, counts = self.helius(self.chain())
+        self.assertEqual(sc.launch_txs(other, "https://api.mainnet-beta.solana.com", "M", early), want)
+        self.assertEqual((counts["getTransaction"], counts["getTransactionsForAddress"]), (len(early), 0))
 
 
 class SolanaPeaks(unittest.TestCase):

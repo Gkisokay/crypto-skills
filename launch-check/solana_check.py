@@ -16,6 +16,8 @@ SYSTEM = "11111111111111111111111111111111"
 PUMP = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
 MAX_SIG_PAGES = 30   # 1,000 signatures each; older history than this and the launch checks are skipped
 MAX_EARLY_TXS = 150  # first-minutes transactions read in full
+TX_PAGE = 100        # getTransactionsForAddress returns up to 100 full transactions a call
+MAX_EXTRA_TX_PAGES = 2  # pages past the minimum, in case the RPC returns failed transactions too
 MAX_WALLETS = 60     # early buyers whose funding is traced
 WORKERS = 4          # Helius free allows 10 req/s
 
@@ -181,6 +183,40 @@ def launch_sigs(call, url, mint, window_s=180):
     return [s for s in reversed(sigs) if not s.get("err")], False
 
 
+def launch_txs(call, url, mint, early):
+    """The launch window's transactions, in the order of the signatures `early`. On Helius they come from
+    getTransactionsForAddress pages (the same objects getTransaction returns, up to TX_PAGE a request); a signature
+    not found on the pages is read on its own."""
+    opts = {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 1}
+    got = {}
+    if "helius" in url and early:
+        want = {s["signature"] for s in early}
+        times = [s["blockTime"] for s in early if s.get("blockTime")]
+        filters = {"status": "succeeded"}
+        if times:
+            filters["blockTime"] = {"gte": min(times), "lte": max(times)}
+        try:
+            token = None
+            for _ in range(-(-len(early) // TX_PAGE) + MAX_EXTRA_TX_PAGES):
+                page_opts = dict(opts, transactionDetails="full", sortOrder="asc", limit=TX_PAGE, filters=filters)
+                if token:
+                    page_opts["paginationToken"] = token
+                page = call("getTransactionsForAddress", [mint, page_opts]) or {}
+                for tx in page.get("data") or []:
+                    sig = tx["transaction"]["signatures"][0]
+                    if sig in want:
+                        got[sig] = tx
+                token = page.get("paginationToken")
+                if len(got) == len(want) or not token or not page.get("data"):
+                    break
+        except RuntimeError:
+            got = {}
+    rest = [s["signature"] for s in early if s["signature"] not in got]
+    with ThreadPoolExecutor(WORKERS) as ex:
+        got.update(zip(rest, ex.map(lambda sig: call("getTransaction", [sig, opts]), rest)))
+    return [got[s["signature"]] for s in early]
+
+
 def bundle_flags_with_holding(cc, t0, buys, total, holds, held=None):
     out = []
     for g in cc.bundle_groups(t0, buys, total, held):
@@ -264,14 +300,11 @@ def check_solana(cc, mint, m):
         r["creator"] = creator
         r["launch"] = {"block": slot0, "ts": t0, "creator": creator, "block_time_s": 0.4}
         in_window = [s for s in sigs if (s.get("blockTime") or t0) <= t0 + cc.LAUNCH_WINDOW_S]
-        early = [s["signature"] for s in in_window[:MAX_EARLY_TXS]]
         if len(in_window) > MAX_EARLY_TXS:  # a busy launch: say how much of the window was actually read
             r["launch"]["window_s"] = max((in_window[MAX_EARLY_TXS - 1].get("blockTime") or t0) - t0, 1)
             r["notes"].append(f"The launch had {len(in_window):,} successful transactions in its first {cc.LAUNCH_WINDOW_S} s; "
                               f"only the first {MAX_EARLY_TXS} were read, covering {r['launch']['window_s']} s.")
-        with ThreadPoolExecutor(WORKERS) as ex:
-            txs = list(ex.map(lambda s: call("getTransaction", [s, {"encoding": "jsonParsed",
-                                                                   "maxSupportedTransactionVersion": 1}]), early))
+        txs = launch_txs(call, rpc.url, mint, in_window[:MAX_EARLY_TXS])
         owners = sorted({owner for tx in txs for owner in owner_deltas(tx, mint)})
         kinds = account_kinds(call, owners)
         kinds[curve] = "program"

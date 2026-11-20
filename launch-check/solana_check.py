@@ -183,10 +183,10 @@ def launch_sigs(call, url, mint, window_s=180):
     return [s for s in reversed(sigs) if not s.get("err")], False
 
 
-def launch_txs(call, url, mint, early):
+def launch_txs(call, url, mint, early, notes=None):
     """The launch window's transactions, in the order of the signatures `early`. On Helius they come from
     getTransactionsForAddress pages (the same objects getTransaction returns, up to TX_PAGE a request); a signature
-    not found on the pages is read on its own."""
+    not found on the pages is read on its own. A page error falls back to single reads, with a line in `notes`."""
     opts = {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 1}
     got = {}
     if "helius" in url and early:
@@ -203,14 +203,17 @@ def launch_txs(call, url, mint, early):
                     page_opts["paginationToken"] = token
                 page = call("getTransactionsForAddress", [mint, page_opts]) or {}
                 for tx in page.get("data") or []:
-                    sig = tx["transaction"]["signatures"][0]
-                    if sig in want:
-                        got[sig] = tx
+                    sigs = ((tx.get("transaction") or {}).get("signatures") or [None]) if isinstance(tx, dict) else [None]
+                    if sigs[0] in want:
+                        got[sigs[0]] = tx
                 token = page.get("paginationToken")
                 if len(got) == len(want) or not token or not page.get("data"):
                     break
         except RuntimeError:
             got = {}
+            if notes is not None:
+                notes.append("Helius's paged transaction read failed, so the launch transactions were read one at a "
+                             "time (same results, slower).")
     rest = [s["signature"] for s in early if s["signature"] not in got]
     with ThreadPoolExecutor(WORKERS) as ex:
         got.update(zip(rest, ex.map(lambda sig: call("getTransaction", [sig, opts]), rest)))
@@ -304,7 +307,7 @@ def check_solana(cc, mint, m):
             r["launch"]["window_s"] = max((in_window[MAX_EARLY_TXS - 1].get("blockTime") or t0) - t0, 1)
             r["notes"].append(f"The launch had {len(in_window):,} successful transactions in its first {cc.LAUNCH_WINDOW_S} s; "
                               f"only the first {MAX_EARLY_TXS} were read, covering {r['launch']['window_s']} s.")
-        txs = launch_txs(call, rpc.url, mint, in_window[:MAX_EARLY_TXS])
+        txs = launch_txs(call, rpc.url, mint, in_window[:MAX_EARLY_TXS], r["notes"])
         owners = sorted({owner for tx in txs for owner in owner_deltas(tx, mint)})
         kinds = account_kinds(call, owners)
         kinds[curve] = "program"

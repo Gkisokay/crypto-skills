@@ -1173,7 +1173,7 @@ class SolanaPagedLaunchReads(unittest.TestCase):
                         "transaction": {"signatures": [f"sig{i:04d}"], "message": {"accountKeys": [f"w{i % 37}"]}}})
         return txs
 
-    def helius(self, txs, honor_status=True, missing=(), page_error=False):
+    def helius(self, txs, honor_status=True, missing=(), page_error=False, junk=False, page_cap=None, sent=None):
         by_sig = {tx["transaction"]["signatures"][0]: tx for tx in txs}
         counts = collections.Counter()
 
@@ -1187,22 +1187,29 @@ class SolanaPagedLaunchReads(unittest.TestCase):
             opts = params[1]
             if opts.get("transactionDetails") == "full" and page_error:
                 raise RuntimeError("getTransactionsForAddress: boom")
+            if opts.get("transactionDetails") == "full" and sent is not None:
+                sent.append(opts.get("filters"))
             rows = sorted(txs, key=lambda t: (t["slot"], t["transaction"]["signatures"][0]),
                           reverse=opts.get("sortOrder") == "desc")
             f = opts.get("filters") or {}
             bt = f.get("blockTime") or {}
-            rows = [t for t in rows if bt.get("gte", -1) <= t["blockTime"] <= bt.get("lte", 10**12)]
+            if bt:
+                rows = [t for t in rows if bt["gte"] <= t["blockTime"] <= bt["lte"]]
             if honor_status and f.get("status") == "succeeded":
                 rows = [t for t in rows if not t["meta"]["err"]]
             start = int(opts.get("paginationToken") or 0)
-            part = rows[start:start + opts["limit"]]
-            nxt = str(start + opts["limit"]) if start + opts["limit"] < len(rows) else None
+            size = min(opts["limit"], page_cap or opts["limit"])
+            part = rows[start:start + size]
+            nxt = str(start + size) if start + size < len(rows) else None
             if opts["transactionDetails"] == "signatures":
                 part = [{"signature": t["transaction"]["signatures"][0], "slot": t["slot"], "blockTime": t["blockTime"],
                          "err": t["meta"]["err"]} for t in part]
             else:
                 part = [t for t in part if t["transaction"]["signatures"][0] not in missing]
                 self.assertEqual({k: opts[k] for k in self.OPTS}, self.OPTS)
+                if junk:  # rows without a transaction.signatures[0]
+                    part = [None, {}, {"transaction": None}, {"transaction": {"signatures": []}},
+                            {"transaction": {"signatures": None}}, "x"] + part
             return {"data": part, "paginationToken": nxt}
         return call, counts
 
@@ -1270,6 +1277,53 @@ class SolanaPagedLaunchReads(unittest.TestCase):
         other, counts = self.helius(self.chain())
         self.assertEqual(sc.launch_txs(other, "https://api.mainnet-beta.solana.com", "M", early), want)
         self.assertEqual((counts["getTransaction"], counts["getTransactionsForAddress"]), (len(early), 0))
+
+    def test_a_page_fallback_is_noted(self):
+        import solana_check as sc
+        call, _ = self.helius(self.chain())
+        early = self.window(sc, call)
+        notes = []
+        sc.launch_txs(self.helius(self.chain(), page_error=True)[0], self.HELIUS, "M", early, notes)
+        self.assertEqual(len(notes), 1)
+        self.assertIn("one at a time", notes[0])
+        notes = []
+        sc.launch_txs(call, self.HELIUS, "M", early, notes)
+        self.assertEqual(notes, [])
+
+    def test_malformed_page_rows_are_skipped_not_fatal(self):
+        import solana_check as sc
+        call, _ = self.helius(self.chain())
+        early = self.window(sc, call)
+        want = self.singles(call, early)
+        messy, counts = self.helius(self.chain(), junk=True)
+        self.assertEqual(sc.launch_txs(messy, self.HELIUS, "M", early), want)
+        self.assertEqual(counts["getTransaction"], 0)
+
+    def test_page_budget_spent_reads_the_rest_on_their_own_in_order(self):
+        import solana_check as sc
+        call, _ = self.helius(self.chain())
+        early = self.window(sc, call)
+        want = self.singles(call, early)
+        short, counts = self.helius(self.chain(), page_cap=30)  # the RPC returns 30 rows a page, whatever is asked
+        self.assertEqual(sc.launch_txs(short, self.HELIUS, "M", early), want)
+        pages = -(-len(early) // sc.TX_PAGE) + sc.MAX_EXTRA_TX_PAGES
+        self.assertEqual(counts["getTransactionsForAddress"], pages)
+        self.assertEqual(counts["getTransaction"], len(early) - 30 * pages)
+
+    def test_signatures_without_block_times_send_no_time_filter(self):
+        import solana_check as sc
+        txs = self.chain()
+        for tx in txs:
+            tx["blockTime"] = None
+        call, _ = self.helius(txs)
+        early = sc.launch_sigs(call, self.HELIUS, "M")[0][:sc.MAX_EARLY_TXS]
+        self.assertTrue(all(s["blockTime"] is None for s in early))
+        want = self.singles(call, early)
+        sent = []
+        paged, counts = self.helius(txs, sent=sent)
+        self.assertEqual(sc.launch_txs(paged, self.HELIUS, "M", early), want)
+        self.assertEqual(sent, [{"status": "succeeded"}] * len(sent))
+        self.assertEqual(counts["getTransaction"], 0)
 
 
 class SolanaPeaks(unittest.TestCase):
